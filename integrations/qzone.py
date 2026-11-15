@@ -1,6 +1,11 @@
 """把日记中的公开生活素材整理成随笔，通过 SnowLuma 发布到 QQ 空间。"""
 
 import asyncio
+import base64
+from pathlib import Path
+from .diary_images import DiaryImages, IllustratedText, IMAGE_INSTRUCTION
+from ..life.diary import writing_material
+from .chat_context import dump, brief
 import json
 from datetime import datetime, timedelta
 
@@ -11,17 +16,20 @@ class DiaryPublisher:
     def __init__(self, engine, context, config):
         self.engine, self.ctx, self.config = engine, context, config
         self.store = engine.store
+        self.images = DiaryImages(engine, context, config)
         self.connection = {"status": "尚未检查空间连接", "error": "", "account": ""}
         with self.store.db:
             for row in self.store.all("diary_publication"):
-                if row["status"] in {"生成中", "发布中"}:
+                if row["status"] in {"生成中", "发布中", "配图中"}:
                     publishing = row["status"] == "发布中"
                     row.update(status="待核对" if publishing else "生成失败",
                                error="发布时插件已重载，请在 QQ 空间核对结果" if publishing else "文案生成已中断，可以重新生成")
                     self.store.put("diary_publication", row)
 
-    def view(self, day):
-        return {"record": self.store.find("diary_publication", day) or {}, "connection": self.connection,
+    async def view(self, day):
+        row = self.store.find("diary_publication", day) or {}
+        image = await asyncio.to_thread(self.images.preview, row)
+        return {"record": row, "image": image, "image_enabled": self.config.diary.image_enabled, "connection": self.connection,
                 "mode": self.config.diary.publish_mode, "visibility": self.config.diary.publish_visibility}
 
     def put(self, row):
@@ -49,7 +57,7 @@ class DiaryPublisher:
 
     def editable(self, day):
         row = self.store.find("diary_publication", day)
-        if row and row["status"] in {"生成中", "发布中", "已发布", "待核对"}:
+        if row and (row.get("image_status") == "生成中" or row["status"] in {"生成中", "发布中", "配图中", "已发布", "待核对"}):
             raise ValueError("这篇文案当前为" + row["status"] + "，请查看发布记录")
         return row
 
@@ -59,26 +67,40 @@ class DiaryPublisher:
         if diary["status"] != "已生成":
             raise ValueError("请先完成这一天的日记")
         material = diary["material"]
-        plans = [{k: p.get(k) for k in ("title", "kind", "status", "location", "start", "end")}
+        plans = [{k: p.get(k) for k in ("title", "kind", "status", "location", "start", "end", "motivation", "continuation_id", "simulation")}
                  for p in material.get("活动", []) if not p.get("session_id") and not p.get("participants")
                  and p["status"] in {"completed", "active"} and p["kind"] != "diary"]
         events = [{k: e.get(k) for k in ("title", "summary", "source", "details")}
                   for e in material.get("经历", []) if not e.get("session_id") and not e.get("participants")]
-        if not plans and not events:
+        moments = [{"summary": row["public_summary"]} for row in material.get("聊天片刻", []) if row.get("public_summary")]
+        public = writing_material({"活动": plans, "经历": events, "聊天片刻": moments, "阅读笔记": material.get("阅读笔记", [])})
+        if not plans and not events and not moments and not material.get("阅读笔记"):
             raise ValueError("这篇日记还没有可整理成空间随笔的个人生活素材")
-        row = {"id": day, "day": day, "content": old.get("content", "") if old else "",
+        row = {**(old or {}), "id": day, "day": day, "content": old.get("content", "") if old else "",
                "status": "生成中", "error": "", "created_at": now.isoformat(), "plan_id": diary.get("plan_id", "")}
         self.put(row)
         try:
             personality = await self.ctx.config.get("personality")
             prompt = ("根据日记中的个人生活素材，写一篇适合发 QQ 空间的中文生活随笔，第一人称，约100到300字。"
-                      "直接返回正文。挑一两件有感触的小事，自然表达心情和还惦记的念头。"
+                      "直接返回正文。挑一两件今天有感触的小事，自然表达心情和还惦记的念头。"
+                      "从聊天中的相处、活动进展和新发现中选重点，同一件事合并叙述；按素材决定是否写阅读。"
                       "内容面向空间读者，讲自己的活动、阅读和见闻；涉及其他人的私聊和身份信息留在私人日记中。"
                       "活动完成情况、阅读进度及具体事实沿用素材，进行中的事情写当前进展。"
-                      f"日期：{day}；角色：{json.dumps(personality, ensure_ascii=False)}；"
-                      f"素材：{json.dumps({'活动': plans, '经历': events}, ensure_ascii=False)}")
-            result = await generate(self.ctx, self.store, self.config, "空间文案", prompt)
-            row.update(content=result["response"].strip(), status="草稿")
+                      f"日期：{day}；角色：{dump(brief(personality, 1500, 6))}；"
+                      f"素材：{dump(public)}")
+            if self.config.diary.image_enabled:
+                result = await generate(self.ctx, self.store, self.config, "空间文案", prompt.replace("直接返回正文。", "") + IMAGE_INSTRUCTION, IllustratedText)
+                row.update(content=result.content.strip(), image_prompt=result.image_prompt, status="草稿")
+            else:
+                result = await generate(self.ctx, self.store, self.config, "空间文案", prompt)
+                row.update(content=result["response"].strip(), status="草稿")
+            if old and old.get("image_file"):
+                (Path(self.ctx.paths.data_dir) / old["image_file"]).unlink()
+            for key in list(row):
+                if key.startswith("image_") and key != "image_prompt":
+                    row.pop(key)
+            if not self.config.diary.image_enabled:
+                row.pop("image_prompt", None)
         except asyncio.CancelledError:
             row.update(status="生成失败", error="文案生成已中断，可以重新生成")
             raise
@@ -87,7 +109,15 @@ class DiaryPublisher:
             raise
         finally:
             self.put(row)
+        if self.config.diary.image_enabled:
+            return await self.illustrate(day, now)
         return row
+
+    async def illustrate(self, day, now, prompt=""):
+        return await self.images.illustrate("diary_publication", day, now, prompt)
+
+    def remove_image(self, day):
+        return self.images.remove("diary_publication", day)
 
     def save(self, day, content, now):
         old = self.editable(day)
@@ -95,6 +125,8 @@ class DiaryPublisher:
         content = content.strip()
         if not content:
             raise ValueError("请填写空间文案")
+        if old and old.get("image_file") and old.get("image_content") != content:
+            old = self.remove_image(day)
         row = {**(old or {}), "id": day, "day": day, "content": content, "status": "草稿", "error": "",
                "updated_at": now.isoformat()}
         self.put(row)
@@ -116,9 +148,12 @@ class DiaryPublisher:
         try:
             await self.check_connection()
             visibility = {"所有人": 1, "好友": 4, "仅自己": 64}[row["visibility"]]
+            params = {"content": row["content"], "ugc_right": visibility}
+            if row.get("image_file"):
+                params["images"] = ["base64://" + await asyncio.to_thread(self.images.encoded, row, 768)]
             sent = True
             result = await self.ctx.call_capability("api.call", api_name="adapter.snowluma.qzone.send_qzone_msg", version="1", timeout_ms=65000,
-                                                    args={"params": {"content": row["content"], "ugc_right": visibility}})
+                                                    args={"params": params})
             if result.get("status") != "ok" or result.get("retcode") != 0:
                 sent = False
                 raise RuntimeError(result.get("error") or result.get("message") or result.get("wording") or "空间发布失败")

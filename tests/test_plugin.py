@@ -20,7 +20,7 @@ async def plugin(tmp_path):
     config.life.autonomous = False
     config.world.weather_enabled = False
     plugin.set_plugin_config(config.model_dump())
-    context = SimpleNamespace(person=SimpleNamespace(get_id=AsyncMock(side_effect=lambda platform, user_id: platform + ":" + user_id)),
+    context = SimpleNamespace(message=SimpleNamespace(get_by_time_in_chat=AsyncMock(return_value=[])), person=SimpleNamespace(get_id=AsyncMock(side_effect=lambda platform, user_id: platform + ":" + user_id)),
                               chat=SimpleNamespace(get_all_streams=AsyncMock(return_value=[{"stream_id": name, "platform": "qq"} for name in ["a", "chat-a", "group", "private"]])),
                               paths=SimpleNamespace(data_dir=tmp_path), logger=logging.getLogger("test"),
                               send=SimpleNamespace(text=AsyncMock(return_value=True)),

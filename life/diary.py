@@ -2,11 +2,37 @@
 
 import asyncio
 import json
+from pathlib import Path
 from datetime import date, datetime, time, timedelta
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from ..integrations.chat_context import brief, dump
 from ..core.models import PlanInput
 from ..integrations.usage import generate
+from ..integrations.diary_images import DiaryImages, IllustratedText, IMAGE_INSTRUCTION
+
+
+class DiaryMoment(BaseModel):
+    source_ids: list[str]
+    summary: str = Field(max_length=500)
+    public_summary: str = Field(max_length=300)
+
+
+class DiaryMoments(BaseModel):
+    moments: list[DiaryMoment] = Field(default_factory=list, max_length=8)
+
+
+def writing_material(material):
+    """各类素材分别留出篇幅，整条选入模型上下文。"""
+    result = {key: material[key] for key in ("日期", "记录截止") if key in material}
+    budgets = {"活动": 4000, "经历": 5000, "状态变化": 1000, "梦境": 1500, "阅读笔记": 2000, "聊天片刻": 5000}
+    for key, budget in budgets.items():
+        result[key] = []
+        for row in material.get(key, []):
+            item = brief({k: v for k, v in row.items() if k != "sources"}, 500, 6)
+            if len(dump([*result[key], item])) <= budget:
+                result[key].append(item)
+    return result
 
 
 class DiarySlot(BaseModel):
@@ -18,6 +44,7 @@ class DiarySlot(BaseModel):
 class Diary:
     def __init__(self, engine, context, config):
         self.engine, self.ctx, self.config = engine, context, config
+        self.images = DiaryImages(engine, context, config)
         with engine.store.db:
             for record in engine.store.all("diary"):
                 if record["status"] == "生成中":
@@ -34,6 +61,64 @@ class Diary:
         dreams = [d for d in store.all("dream") if d["status"] == "已生成" and start <= self.engine.time(d["sleep_end"]) < min(end, now)]
         return {"阅读笔记": [{k: n[k][:500] for k in ("book_title", "chapter_title", "summary", "thoughts")} for n in store.all("book_note") if n["status"] == "已完成" and start <= self.engine.time(n["finished_at"]) < min(end, now)][-4:], "日期": day.isoformat(), "记录截止": min(end, now).isoformat(), "活动": plans, "经历": experiences,
                 "状态变化": [{k: s[k] for k in ("at", "energy", "hunger", "mood", "stress") if k in s} for s in states], "梦境": dreams}
+
+    async def chat_moments(self, day, now, material):
+        start = datetime.combine(day, time.min, tzinfo=now.tzinfo)
+        end = min(start + timedelta(days=1), now)
+        sources = {}
+        streams = await self.ctx.chat.get_all_streams(platform="all_platforms")
+        remaining = 10000
+        for stream in sorted(streams, key=lambda row: row.get("last_active_time", 0) or 0, reverse=True):
+            if remaining < 500:
+                break
+            response = await self.ctx.message.get_by_time_in_chat(
+                stream["stream_id"], str(start.timestamp()), str(end.timestamp()),
+                limit=40, limit_mode="latest", filter_command=True, include_binary_data=False)
+            rows = []
+            for message in response:
+                text = (message.get("processed_plain_text") or "").strip()
+                if not text or text.startswith("/"):
+                    continue
+                info = message.get("message_info", {}).get("user_info", {})
+                rows.append({"message_id": message["message_id"], "user_id": str(info.get("user_id", "")),
+                             "speaker": "角色" if message.get("account_id") and str(info.get("user_id", "")) == str(message["account_id"]) else info.get("user_nickname", "对方"),
+                             "text": text[:500], "timestamp": message.get("timestamp")})
+            selected = []
+            for row in reversed(rows):
+                if len(dump([*selected, row])) <= min(2500, remaining):
+                    selected.append(row)
+            if selected:
+                key = "chat-" + str(len(sources) + 1)
+                sources[key] = {"session_id": stream["stream_id"], "messages": list(reversed(selected))}
+                remaining -= len(dump(selected))
+        for event in material["经历"]:
+            if event.get("session_id") and remaining >= 600:
+                item = brief({k: event[k] for k in ("id", "session_id", "source", "summary", "details") if k in event}, 400, 4)
+                size = len(dump(item))
+                if size <= remaining:
+                    sources["event-" + event["id"]] = item
+                    remaining -= size
+        if not sources:
+            return []
+        prompt = (
+            "整理角色今天与人的相处，输出 JSON：moments 数组，每项为 source_ids、summary、public_summary。"
+            "最多选八件值得记下的小事，重复提到的同一件事合并。source_ids 使用给出的素材编号。"
+            "summary 写发生了什么、是谁说的、角色有什么回应；承诺和愿望按原来的语气记录。"
+            "public_summary 是适合角色发空间的个人感受或日常，比如收到礼物后的开心、一次聊天带来的安慰。"
+            "称呼用有人、朋友等泛称，个人身份、联系方式、私密倾诉留在 summary；适合公开的内容为空时填空字符串。"
+            "不同聊天流中的人物分别处理，具体物品、动作和细节取自素材，模型自己的提议按提议记录。"
+            f"日期：{day.isoformat()}；素材：{dump(sources)}"
+        )
+        def validate(value):
+            for moment in value.moments:
+                if not moment.source_ids or any(key not in sources for key in moment.source_ids):
+                    raise ValueError("每个片刻请填写对应素材编号")
+                sessions = {sources[key]["session_id"] for key in moment.source_ids}
+                if len(sessions) != 1:
+                    raise ValueError("每个片刻请使用同一聊天流的素材")
+        result = await generate(self.ctx, self.engine.store, self.config, "生活日记", prompt, DiaryMoments, validate=validate)
+        return [{**moment.model_dump(), "session_id": sources[moment.source_ids[0]]["session_id"],
+                 "sources": [sources[key] for key in moment.source_ids]} for moment in result.moments]
 
     async def arrange(self, now, spatial):
         if not self.config.diary.enabled:
@@ -87,36 +172,48 @@ class Diary:
             raise ValueError("请选择今天或过去的日期")
         store = self.engine.store
         old = store.find("diary", day.isoformat())
-        if old and old["status"] == "生成中":
+        if old and (old["status"] == "生成中" or old.get("image_status") == "生成中"):
             return old
         material = self.material(day, now)
-        if not any(material[key] for key in ("活动", "经历", "状态变化", "梦境")):
-            raise ValueError("这一天还没有生活记录，积累活动或经历后即可写日记")
-        record = {"id": day.isoformat(), "day": day.isoformat(), "title": day.isoformat() + " 的一天",
+        record = {**(old or {}), "id": day.isoformat(), "day": day.isoformat(), "title": day.isoformat() + " 的一天",
                   "content": old.get("content", "") if old else "", "status": "生成中", "error": "",
                   "plan_id": plan_id, "created_at": now.isoformat(), "complete": day < now.date(), "material": material}
         with store.db:
             store.put("diary", record)
         try:
+            material["聊天片刻"] = await self.chat_moments(day, now, material)
+            if not any(material[key] for key in ("活动", "经历", "状态变化", "梦境", "聊天片刻", "阅读笔记")):
+                raise ValueError("这一天还没有生活记录，积累活动或经历后即可写日记")
             personality = await self.ctx.config.get("personality")
             prompt = (
                 "请以角色自己的第一人称写今天的生活日记，直接返回中文正文，约300到600字。"
-                "按一天的节奏讲讲做了什么、感受如何、作品做到哪里，以及还惦记的事。平淡的一天可以简短些。"
+                "挑今天真正有感触的两三件事来写：与人的相处、活动的小进展、心情转折和还惦记的事。"
+                "根据当天素材决定重点，阅读只是生活的一部分。同一件事在聊天、经历和笔记中重复出现时合并叙述。平淡的一天可以简短些。"
                 "叙述以提供的活动和经历为依据：completed 是完成的活动，active 是进行中的活动，"
                 "scheduled 是计划，cancelled 是取消，awaiting_confirmation 是等待确认完成情况。"
                 "simulated 用角色世界的视角讲述，reported 是用户讲述，observed 是实际互动；梦境以梦见来表达。"
                 "涉及对方的行动和约定，沿用记录里的信息。感受可以自然表达，具体过程和进度沿用已有细节。"
                 "日记写到记录截止时间为止，尚在进行的事情按当前进展叙述。"
-                f"角色人格：{json.dumps(personality, ensure_ascii=False)}；生活背景：{self.config.life.background}；"
-                f"生活记录：{json.dumps(material, ensure_ascii=False)}"
+                f"角色人格：{dump(brief(personality, 1500, 6))}；生活背景：{self.config.life.background[:1500]}；"
+                f"生活记录：{dump(writing_material(material))}"
             )
-            result = await generate(self.ctx, store, self.config, "生活日记", prompt)
-            if not result["success"]:
-                raise RuntimeError(result.get("error") or "日记模型调用失败")
-            content = result["response"].strip()
+            if self.config.diary.image_enabled:
+                result = await generate(self.ctx, store, self.config, "生活日记", prompt.replace("直接返回中文正文，", "") + IMAGE_INSTRUCTION, IllustratedText)
+                content = result.content.strip()
+                record["image_prompt"] = result.image_prompt
+            else:
+                result = await generate(self.ctx, store, self.config, "生活日记", prompt)
+                content = result["response"].strip()
             if not content:
                 raise ValueError("模型返回了空日记，请重新生成")
             record.update(content=content, status="已生成")
+            if old and old.get("image_file"):
+                (Path(self.ctx.paths.data_dir) / old["image_file"]).unlink()
+            for key in list(record):
+                if key.startswith("image_") and key != "image_prompt":
+                    record.pop(key)
+            if not self.config.diary.image_enabled:
+                record.pop("image_prompt", None)
         except asyncio.CancelledError:
             record.update(status="生成失败", error="写作任务已中断", retry_at=(now + timedelta(minutes=5)).isoformat())
             raise
@@ -126,4 +223,6 @@ class Diary:
         finally:
             with store.db:
                 store.put("diary", record)
+        if self.config.diary.image_enabled:
+            return await self.images.illustrate("diary", day.isoformat(), now)
         return record

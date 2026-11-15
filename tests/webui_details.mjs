@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 const html=readFileSync(new URL('../webui/editor.html',import.meta.url),'utf8').replace(/\r\n/g,'\n');
 const metadata=JSON.parse(html.match(/const PAGE_METADATA=(.*);\n/)[1]);
-function source(name){const start=html.indexOf(['showDetail','renderDiaryPublication'].includes(name)?'async function '+name:'function '+name);return html.slice(start,html.indexOf('\n}\n',start)+3)}
+function source(name){const start=html.indexOf(['showDetail','renderDiaryPublication','renderPrivateDiaryImage'].includes(name)?'async function '+name:'function '+name);return html.slice(start,html.indexOf('\n}\n',start)+3)}
 class Element{
  constructor(tag){this.tag=tag;this.children=[];this.style={};this.textContent=''}
+ insertBefore(item,before){this.children.splice(this.children.indexOf(before),0,item)}
+ removeAttribute(name){delete this[name]}
  append(...items){this.children.push(...items)}
  replaceChildren(){this.children=[]}
  showModal(){this.open=true}
@@ -17,7 +19,7 @@ for(const [page,category,selection,field] of [['diary','diary','entry','material
  const document={body:new Element('body'),createElement:tag=>new Element(tag)};const calls=[];
  const maibot={query:async(name,args)=>{if(name==='diary_publication')return {record:{},connection:{status:'尚未检查'},mode:'关闭',visibility:'好友'};calls.push({name,args});return {text:'详情第'+args.page+'页',page:args.page,pages:2}}};
  const valueOf=reference=>reference?.source===selection?row[reference.field]:reference;
- const show=new Function('document','maibot','valueOf','run',source('renderPager')+source('renderDiaryPublication')+source('showDetail')+';return showDetail')(document,maibot,valueOf,work=>work());
+ const show=new Function('document','maibot','valueOf','run',source('renderPager')+source('renderPrivateDiaryImage')+source('renderDiaryPublication')+source('showDetail')+';return showDetail')(document,maibot,valueOf,work=>work());
  const declaration=metadata[page].view.content.find(item=>item.type==='dialog');
  await show(declaration,row);
  assert.equal(calls[0].name,'record_detail');assert.deepEqual(calls[0].args,{category,record_id:'record-id',field,page:1});

@@ -1,5 +1,6 @@
 """MaiBot 原生工作区页面的数据和操作接口。"""
 
+import asyncio
 import json
 import math
 from datetime import date, timedelta
@@ -180,15 +181,23 @@ class WebUI:
                               "material_text": "", "publication_status": (self.store.find("diary_publication", row["id"]) or {}).get("status", "尚未生成文案")} for row in rows]}, page, ['entries'])
 
     @API("ui_diary_publication", description="读取日记空间文案和发布状态")
-    async def ui_diary_publication(self, day: str) -> dict:
-        return self.diary_publisher.view(day)
+    async def ui_diary_publication(self, day: str, scope: str = "publication") -> dict:
+        if scope == "diary":
+            row = self.store.get("diary", day)
+            return {"record": {k: v for k, v in row.items() if k != "material"}, "image": await asyncio.to_thread(self.diary.images.preview, row)}
+        return await self.diary_publisher.view(day)
 
     @API("ui_diary_publish_action", description="生成、编辑和发布日记空间文案")
-    async def ui_diary_publish_action(self, action: str, day: str = "", content: str = "") -> dict:
+    async def ui_diary_publish_action(self, action: str, day: str = "", content: str = "", image_prompt: str = "", scope: str = "publication") -> dict:
         if action in {"confirm_published", "confirm_unpublished"}:
             return self.diary_publisher.reconcile(day, action == "confirm_published", self.now())
         if action == "check":
             return self.start_job("检查空间连接", self.diary_publisher.check_connection())
+        if action in {"image", "remove_image"}:
+            category = "diary" if scope == "diary" else "diary_publication"
+            if action == "remove_image":
+                return self.diary.images.remove(category, day)
+            return self.start_job("生成日记配图", self.diary.images.illustrate(category, day, self.now(), image_prompt))
         if action == "generate":
             return self.start_job("生成空间文案", self.diary_publisher.prepare(day, self.now()))
         if action == "save":
@@ -204,9 +213,6 @@ class WebUI:
         chosen = date.fromisoformat(day) if day else now.date()
         if chosen > now.date():
             raise ValueError("请选择今天或过去的日期")
-        material = self.diary.material(chosen, now)
-        if not any(material[key] for key in ("活动", "经历", "状态变化", "梦境")):
-            raise ValueError("这一天还没有生活记录，积累活动或经历后即可写日记")
         plan = PlanInput(title="写生活日记", kind="diary", start=now.isoformat(), end=(now + timedelta(minutes=15)).isoformat(),
                          diary_day=chosen.isoformat(), motivation="用户安排写作窗口", flexible=True)
         return self.spatial.schedule(plan, "", now)

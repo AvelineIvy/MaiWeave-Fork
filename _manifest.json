@@ -28,6 +28,11 @@
       "type": "python_package",
       "name": "tzdata",
       "version_spec": ">=2026.1"
+    },
+    {
+      "type": "python_package",
+      "name": "Pillow",
+      "version_spec": ">=10.0"
     }
   ],
   "capabilities": [
@@ -41,6 +46,7 @@
     "chat.open_session",
     "person.get_value",
     "chat.get_all_streams",
+    "message.get_by_time_in_chat",
     "person.get_id",
     "llm.get_available_models",
     "maisaka.reply.generate",
