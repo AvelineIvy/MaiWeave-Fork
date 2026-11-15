@@ -16,13 +16,13 @@
   },
   "sdk": {
     "min_version": "2.21.0",
-    "max_version": "2.21.99"
+    "max_version": "2.23.99"
   },
   "dependencies": [
     {
       "type": "python_package",
       "name": "lunar_python",
-      "version_spec": "==1.4.8"
+      "version_spec": ">=1.4.8,<2.0"
     },
     {
       "type": "python_package",

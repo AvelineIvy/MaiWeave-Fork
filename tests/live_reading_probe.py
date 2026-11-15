@@ -6,6 +6,7 @@ import re
 import sys
 from contextlib import suppress
 from datetime import datetime, timedelta
+from importlib.metadata import version
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -281,6 +282,9 @@ class Probe(MaiBotPlugin):
                 lunar = await p.ui_save_anniversary(profile["id"], "纪念日", "lunar", 1, 1)
                 assert p.anniversaries.occurrence(solar, 2025) == date(2025, 2, 28)
                 assert p.anniversaries.occurrence(lunar, 2024) == date(2024, 2, 10)
+                leap = await p.ui_save_anniversary(profile["id"], "闰月纪念日", "lunar", 2, 1, 2023, True)
+                assert p.anniversaries.occurrence(leap, 2023) == date(2023, 3, 22)
+                assert p.anniversaries.occurrence(leap, 2024) == date(2024, 3, 10)
                 assert not p.anniversaries.upcoming(now.date(), "other-chat")
                 for ago in (1, 2, 3):
                     at = now - timedelta(days=ago)
@@ -307,7 +311,9 @@ class Probe(MaiBotPlugin):
                 await p.ui_cleanup()
                 await p.ui_books()
                 await p.ui_anniversaries()
-                self.result = {"status": "通过", "case": case, "result": {"calendar": "公历与农历通过", "habits": "多日期活动学习通过",
+                self.result = {"status": "通过", "case": case, "result": {
+                    "dependencies": {name: version(name) for name in ("lunar_python", "maibot-plugin-sdk")},
+                    "calendar": "公历与农历通过", "habits": "多日期活动学习通过",
                     "readonly_api": "跨插件调用与只读检查通过", "review": checked["status"], "operation": "完成", "retention": "预览清理及页面读回通过"}}
                 return
             if case == "schedule_edges":

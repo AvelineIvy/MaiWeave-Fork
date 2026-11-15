@@ -14,7 +14,7 @@
 
 [![Release](https://img.shields.io/github/v/release/ilworkcn/MaiWeave?label=Release&color=7ba989)](https://github.com/ilworkcn/MaiWeave/releases)
 [![MaiBot](https://img.shields.io/badge/MaiBot-1.3.19–1.4.x-7ba989)](https://docs.maibot.chat/)
-[![SDK](https://img.shields.io/badge/SDK-2.21.x-79a7b8)](https://github.com/Mai-with-u/maibot-plugin-sdk)
+[![SDK](https://img.shields.io/badge/SDK-2.21–2.23-79a7b8)](https://github.com/Mai-with-u/maibot-plugin-sdk)
 [![Python](https://img.shields.io/badge/Python-3.11%2B-79a7b8?logo=python&logoColor=white)](https://github.com/ilworkcn/MaiWeave/blob/main/pyproject.toml)
 [![License](https://img.shields.io/badge/License-GPL--3.0-orange)](https://github.com/ilworkcn/MaiWeave/blob/main/LICENSE)
 
@@ -158,13 +158,13 @@ MaiWeave 让麦麦在聊天之外，也有自己的日程、兴趣和牵挂。�
 
 ## 🚀 安装与设置
 
-适配 **MaiBot 1.3.19–1.4.x、插件 SDK 2.21.x**，搭配支持 WebUI v2 页面协议的 WebUI。
+适配 **MaiBot 1.3.19–1.4.x、插件 SDK 2.21–2.23**，搭配支持 WebUI v2 页面协议的 WebUI。
 
 1. 从 [Release](https://github.com/ilworkcn/MaiWeave/releases/latest) 下载对应版本的 ZIP 安装包。
 2. 在 MaiBot 的 **插件扩展 → 更多操作 → 从 ZIP 安装插件** 中上传，然后启用。
 3. 打开配置，选好时区，写一点兴趣和生活背景。模型任务默认用 `utils`，也可以从下拉框选择。
 
-商店安装会自动安装所需依赖。手动安装方式见下方。
+商店安装会自动安装所需依赖。手动安装方式和依赖版本见下方。
 
 第一次使用，可以先选好这几项：
 
@@ -185,7 +185,9 @@ MaiWeave 让麦麦在聊天之外，也有自己的日程、兴趣和牵挂。�
 天气由 Open-Meteo 提供，联网见闻和地点搜索使用 MaiBot 已配置的联网服务。主动交流方式、发送频率和聊天细节等选项，见[配置指南](https://github.com/ilworkcn/MaiWeave/blob/main/docs/配置指南.md)。
 
 <details>
-<summary>手动安装：解压目录与 uv 命令</summary>
+<summary>手动安装与依赖版本</summary>
+
+农历功能使用 `lunar_python>=1.4.8,<2.0`，支持 1.4.9；SDK 依赖为 `maibot-plugin-sdk>=2.21.0,<3.0`，已适配 2.21、2.22 和 2.23 系列。
 
 1. 下载 Release 安装包，解压到 MaiBot 的 `plugins/MaiWeave` 目录，该目录下应直接包含 `_manifest.json` 和 `requirements.txt`。
 2. 在 **MaiBot 根目录**打开终端，用 uv 将插件依赖安装到 MaiBot 的虚拟环境：
