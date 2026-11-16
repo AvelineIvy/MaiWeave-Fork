@@ -1985,6 +1985,53 @@
         }
       },
       "actions": {}
+    },
+    {
+      "id": "character",
+      "title": "角色与图片",
+      "mode": "custom",
+      "icon": "settings",
+      "entry": "webui/character.html",
+      "layout": "document",
+      "queries": {
+        "data": {
+          "api": "ui_character_image",
+          "version": "1",
+          "parameters": {}
+        }
+      },
+      "actions": {
+        "manage": {
+          "api": "ui_character_image_action",
+          "version": "1",
+          "parameters": {
+            "action": {
+              "type": "string",
+              "required": true
+            },
+            "content": {
+              "type": "string",
+              "max_length": 32768
+            }
+          }
+        },
+        "save": {
+          "api": "ui_save_character",
+          "version": "1",
+          "parameters": {
+            "content": {
+              "type": "string",
+              "required": true,
+              "max_length": 16384
+            }
+          }
+        },
+        "generate": {
+          "api": "ui_generate_character",
+          "version": "1",
+          "parameters": {}
+        }
+      }
     }
   ]
 }

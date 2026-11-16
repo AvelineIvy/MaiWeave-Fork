@@ -107,15 +107,14 @@ async def test_generate_card_uses_native_personality_and_selected_model(plugin):
     p.ctx.config.get.return_value = {"personality": "黑发，喜欢散步"}
     p.ctx.llm.generate.side_effect = None
     p.ctx.llm.generate.return_value = {"success": True, "response": json.dumps({"appearance":"黑色齐肩发", "clothing":"米白色针织衫"})}
-    await p.on_config_widget_action("generate_character")
+    await p.ui_generate_character()
     await asyncio.gather(*list(p.jobs))
     p.ctx.config.get.assert_awaited_with("personality")
     assert "喜欢散步" in p.ctx.llm.generate.call_args.args[0]
     assert p.ctx.llm.generate.call_args.kwargs["task_name"] == "replyer"
-    states = await p.get_config_widget_state()
-    assert "黑色齐肩发" in states["character_draft"].text
-    assert states["character_draft"].tone == "success"
-    assert not states["generate_character"].disabled
+    state = await p.ui_character_image()
+    assert state["draft"]["appearance"] == "黑色齐肩发"
+    assert not state["generating"]
     assert p.config.diary.image_character_appearance == ""
     assert p.store.all("model_usage")[-1]["feature"] == "配图提示词"
 
@@ -161,7 +160,85 @@ async def test_reference_request_multipart_and_unsupported(plugin, monkeypatch):
     assert "人物在折纸".encode() in req.data
     def unsupported(request, timeout):
         if isinstance(request, str): return io.BytesIO(PNG)
-        raise HTTPError(request.full_url, 404, "Not found", {}, io.BytesIO(b""))
+        raise HTTPError(request.full_url, 404, "Not found", {}, io.BytesIO(b'{"error":{"code":"model_not_found","message":"the requested model is unavailable"}}'))
     monkeypatch.setattr(module, "urlopen", unsupported)
-    with pytest.raises(RuntimeError, match="未提供参考图接口"):
+    with pytest.raises(RuntimeError, match="images/edits.*404.*model_not_found"):
         images.request("人物", "https://example.com/character.png")
+
+
+async def test_uploaded_reference_priority_replace_remove_and_aliyun(plugin, monkeypatch):
+    import base64, io
+    import maiweave.integrations.diary_images as module
+    p = plugin
+    images = p.diary_publisher.images
+    p.config.diary.image_character_reference_url = "https://example.com/old.png"
+    await p.ui_character_image_action("upload", base64.b64encode(PNG).decode())
+    assert images.reference_source() == images.reference_path
+    view = await p.ui_character_image()
+    assert view["uploaded"] and view["preview"].startswith("data:image/jpeg;base64,")
+    await p.ui_character_image_action("upload", base64.b64encode(PNG).decode())
+    assert len(list(images.reference_path.parent.glob("character_reference*"))) == 1
+    requests=[]
+    def request(req, timeout):
+        requests.append(req)
+        return io.BytesIO(json.dumps({"data":[{"b64_json":base64.b64encode(PNG).decode()}]}).encode())
+    monkeypatch.setattr(module,"urlopen",request)
+    p.config.diary.image_reference_protocol = "通义千问兼容接口"
+    images.request("人物画面", images.reference_source())
+    req=requests[-1]
+    payload=json.loads(req.data)
+    assert req.full_url.endswith("/images/generations")
+    assert payload["image"].startswith("data:image/png;base64,")
+    assert payload["size"] == "1024x768"
+    await p.ui_character_image_action("remove")
+    assert not images.reference_path.exists()
+    assert images.reference_source() == p.config.diary.image_character_reference_url
+
+
+async def test_reference_chunk_upload_and_abort(plugin):
+    import base64
+    p = plugin
+    data = base64.b64encode(PNG).decode()
+    await p.ui_character_image_action("begin")
+    for start in range(0, len(data), 32):
+        await p.ui_character_image_action("append", data[start:start+32])
+    await p.ui_character_image_action("finish")
+    path=p.diary_publisher.images.reference_path
+    original=path.read_bytes()
+    assert not path.with_suffix(".upload").exists()
+    await p.ui_character_image_action("begin")
+    await p.ui_character_image_action("append", data)
+    await p.ui_character_image_action("abort")
+    assert path.read_bytes() == original
+    assert not path.with_suffix(".upload").exists()
+
+
+async def test_character_settings_saved_reloaded_and_validated(plugin):
+    from pydantic import ValidationError
+    from maiweave.integrations.diary_images import DiaryImages
+    p = plugin
+    images = p.diary_publisher.images
+    await p.ui_save_character(json.dumps({"image_character_enabled": True, "image_character_appearance": "银发",
+                                        "chat_image_style": "水彩", "image_enabled": False}))
+    assert p.config.diary.image_character_appearance == "银发"
+    assert not p.config.diary.image_enabled
+    p.config.diary.image_character_appearance = "配置中的旧值"
+    DiaryImages(p.engine, p.ctx, p.config)
+    assert p.config.diary.image_character_appearance == "银发"
+    with pytest.raises(ValidationError):
+        await p.ui_save_character(json.dumps({"image_character_appearance": "长" * 801}))
+    assert images.character_settings()["image_character_appearance"] == "银发"
+    with pytest.raises(ValueError):
+        await p.ui_save_character(json.dumps({"image_api_key": "other"}))
+
+
+async def test_character_migrates_existing_values_once(plugin):
+    from maiweave.integrations.diary_images import DiaryImages
+    p = plugin
+    with p.store.db:
+        p.store.delete("image_settings", "character")
+    p.config.diary.image_style = "原有风格"
+    p.config.diary.image_character_appearance = "原有外貌"
+    images = DiaryImages(p.engine, p.ctx, p.config)
+    assert images.character_settings()["image_style"] == "原有风格"
+    assert p.store.get("image_settings", "character")["image_character_appearance"] == "原有外貌"

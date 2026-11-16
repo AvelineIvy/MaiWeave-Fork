@@ -1,0 +1,75 @@
+"""图片协议、参考图传递与用量解析。"""
+import base64
+import io
+import json
+import pytest
+from test_plugin import plugin
+from test_diary_images import PNG
+from maiweave.integrations import diary_images
+
+
+@pytest.mark.parametrize("protocol", ["OpenAI 图片编辑", "通义千问兼容接口", "OpenAI Chat 生图", "Gemini 原生", "DashScope 多模态"])
+@pytest.mark.parametrize("reference", [False, True])
+async def test_protocol_request_and_response(plugin, monkeypatch, protocol, reference):
+    images = plugin.diary_publisher.images
+    cfg = plugin.config.diary
+    cfg.image_reference_protocol = protocol
+    cfg.image_api_key = "test"
+    cfg.image_model = "qwen-image-2.0-pro"
+    encoded = base64.b64encode(PNG).decode()
+    images.upload_reference(encoded)
+    requests = []
+    def respond(request, timeout):
+        requests.append(request)
+        if protocol == "Gemini 原生":
+            result = {"candidates": [{"content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": encoded}}]}}],
+                      "usageMetadata": {"promptTokenCount": 12, "candidatesTokenCount": 20, "totalTokenCount": 32}}
+        elif protocol == "DashScope 多模态":
+            result = {"output": {"choices": [{"message": {"content": [{"image": "data:image/png;base64," + encoded}]}}]}}
+        elif protocol == "OpenAI Chat 生图":
+            result = {"choices": [{"message": {"images": [{"image_url": {"url": "data:image/png;base64," + encoded}}]}}]}
+        else:
+            result = {"data": [{"b64_json": encoded}]}
+        return io.BytesIO(json.dumps(result).encode())
+    monkeypatch.setattr(diary_images, "urlopen", respond)
+    data, tokens = images.request("窗边", images.reference_path if reference else "")
+    assert data == PNG
+    request = requests[0]
+    assert request.full_url.endswith(images.request_endpoint(reference))
+    if protocol == "OpenAI 图片编辑" and reference:
+        assert b'filename="character.png"' in request.data
+    else:
+        payload = json.loads(request.data)
+        assert ("data:image/png;base64," in request.data.decode() or '"inlineData"' in request.data.decode()) == reference
+        if protocol == "DashScope 多模态":
+            assert payload["parameters"]["negative_prompt"] == cfg.image_negative_prompt
+        if protocol == "Gemini 原生":
+            assert request.get_header("X-goog-api-key") == "test"
+            assert "Authorization" not in request.headers
+            assert tokens == {"input_tokens": 12, "output_tokens": 20, "total_tokens": 32}
+
+
+@pytest.mark.parametrize("content", ["![图片](https://example.com/image.png)", "data:image/png;base64," + base64.b64encode(PNG).decode()])
+async def test_chat_image_text_formats(plugin, monkeypatch, content):
+    images = plugin.diary_publisher.images
+    plugin.config.diary.image_reference_protocol = "OpenAI Chat 生图"
+    def respond(request, timeout):
+        if isinstance(request, str):
+            assert request == "https://example.com/image.png"
+            return io.BytesIO(PNG)
+        return io.BytesIO(json.dumps({"choices": [{"message": {"content": content}}]}).encode())
+    monkeypatch.setattr(diary_images, "urlopen", respond)
+    assert images.request("窗边")[0] == PNG
+
+
+async def test_qwen21_negative_prompt_in_text(plugin, monkeypatch):
+    images = plugin.diary_publisher.images
+    plugin.config.diary.image_reference_protocol = "DashScope 多模态"
+    plugin.config.diary.image_model = "qwen-image-2.1-pro"
+    assert not images.separate_negative()
+    def respond(request, timeout):
+        assert "negative_prompt" not in json.loads(request.data)["parameters"]
+        return io.BytesIO(b'{"message":"test error"}')
+    monkeypatch.setattr(diary_images, "urlopen", respond)
+    with pytest.raises(ValueError, match="test error"):
+        images.request("窗边")

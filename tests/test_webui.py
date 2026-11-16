@@ -74,7 +74,9 @@ def test_display_groups_preserve_config_paths_and_values():
     schema = instance.get_webui_config_schema()
     paths = [(section["name"], name) for section in schema["sections"].values() for name in section["fields"]]
     assert len(paths) == len(set(paths))
-    assert set(paths) == {(section, name) for section, fields in config.items() for name in fields}
+    from maiweave.integrations.diary_images import CHARACTER_FIELDS
+    assert set(paths) == {(section, name) for section, fields in config.items() for name in fields
+                          if not (section == "diary" and name in CHARACTER_FIELDS)}
     for section in schema["sections"].values():
         for name, field in section["fields"].items():
             assert field["hint"]
@@ -101,7 +103,7 @@ def test_all_page_bindings_match_real_registered_api():
     raw = (Path(__file__).parents[1] / "webui.json").read_bytes()
     assert len(raw) <= 128 * 1024
     pages = json.loads(raw)["pages"]
-    assert len(pages) == 10
+    assert len(pages) == 11
     for page in pages:
         for binding in [*page["queries"].values(), *page["actions"].values()]:
             assert "required" not in binding
@@ -141,7 +143,7 @@ def test_merged_pages_keep_action_selections_and_data_sources():
     root = Path(__file__).parents[1]
     pages = json.loads((root / "webui.json").read_text(encoding="utf-8"))["pages"]
     metadata = json.loads(re.search(r"const PAGE_METADATA=(.*);", (root / "webui/editor.html").read_text(encoding="utf-8")).group(1))
-    assert {p["id"] for p in pages} == {"overview", "schedule", "world", "space", "records", "continuity", "anniversaries", "usage", "diary", "books"}
+    assert {p["id"] for p in pages} == {"overview", "schedule", "world", "space", "records", "continuity", "anniversaries", "usage", "diary", "books", "character"}
     def objects(value):
         if isinstance(value, dict):
             yield value

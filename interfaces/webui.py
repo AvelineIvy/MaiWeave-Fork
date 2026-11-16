@@ -46,18 +46,41 @@ def plan_row(plan):
 
 
 class WebUI:
+    @API("ui_character_image", description="查看共用角色参考图")
+    async def ui_character_image(self) -> dict:
+        images = self.diary_publisher.images
+        return {**await asyncio.to_thread(images.reference_view), "settings": images.character_settings(),
+                "draft": self._character_draft, "generating": self._character_draft_running,
+                "draft_message": self._character_draft_text}
+
+    @API("ui_save_character", description="保存角色卡、画风和图片用途")
+    async def ui_save_character(self, content: str) -> dict:
+        return self.diary_publisher.images.save_character(json.loads(content))
+
+    @API("ui_character_image_action", description="上传或移除共用角色参考图")
+    async def ui_character_image_action(self, action: str, content: str = "") -> dict:
+        images = self.diary_publisher.images
+        if action == "upload":
+            return await asyncio.to_thread(images.upload_reference, content)
+        if action in {"begin", "append", "finish", "abort"}:
+            return await asyncio.to_thread(images.reference_upload, action, content)
+        if action == "remove":
+            return await asyncio.to_thread(images.remove_reference)
+        raise ValueError("请选择上传或移除参考图")
+
     @API("ui_generate_character", description="根据 MaiBot 人设生成角色卡草稿")
     async def ui_generate_character(self) -> dict:
         if self._character_draft_running:
             raise ValueError("角色卡正在生成，请等待结果")
+        self._character_draft = None
         self._character_draft_running = True
         self._character_draft_text = "正在读取 MaiBot 人设并生成角色卡…"
         self._character_draft_tone = "neutral"
         async def run():
             try:
                 draft = await self.diary_publisher.images.character_draft()
-                self._character_draft_text = ("角色卡草稿已生成，可复制到下方「麦麦角色卡」中修改、保存。\n"
-                    + "外貌设定：" + draft.appearance + "\n常用穿着：" + draft.clothing)
+                self._character_draft = draft.model_dump()
+                self._character_draft_text = "草稿已填入外貌与穿着，修改后点击保存即可。"
                 self._character_draft_tone = "success"
             except Exception as error:
                 self._character_draft_text = "角色卡生成失败：" + str(error)[:1500]

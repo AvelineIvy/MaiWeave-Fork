@@ -51,7 +51,9 @@ async def test_tabs_and_model_selection_preserve_config(plugin):
     assert len(shown) == len(set(shown)) and set(shown) == set(schema["sections"])
     paths = [(section["name"], key) for section in schema["sections"].values() for key in section["fields"]]
     assert len(paths) == len(set(paths))
-    assert set(paths) == {(section, key) for section, fields in plugin.config.model_dump().items() for key in fields}
+    from maiweave.integrations.diary_images import CHARACTER_FIELDS
+    assert set(paths) == {(section, key) for section, fields in plugin.config.model_dump().items() for key in fields
+                          if not (section == "diary" and key in CHARACTER_FIELDS)}
     fields = schema["sections"]["model_expression"]["fields"]
     assert "custom_reading" in fields["reading"]["choices"]
     assert "当前使用：custom_reading" in fields["reading"]["hint"]

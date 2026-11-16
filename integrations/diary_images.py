@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import io
+import re
 from PIL import Image
 from datetime import datetime
 from pathlib import Path
@@ -29,6 +30,11 @@ class IllustratedText(BaseModel):
     character_visible: bool = False
 
 
+CHARACTER_FIELDS = ("image_character_enabled", "image_character_reference_enabled", "image_character_reference_url",
+                    "image_character_appearance", "image_character_clothing", "image_style", "chat_image_style",
+                    "image_negative_prompt", "chat_images_enabled", "image_enabled")
+
+
 IMAGE_INSTRUCTION = "输出 JSON：content（正文）、image_prompt（1200字以内的中文画面描述）。配图选正文中的一个生活瞬间，着重场景、物件、光线与氛围，具体细节取自素材。"
 
 
@@ -38,12 +44,34 @@ class DiaryImages:
 
     def __init__(self, engine, context, config):
         self.store, self.ctx, self.config = engine.store, context, config
+        saved = self.store.find("image_settings", "character")
+        if saved is None:
+            saved = {"id": "character", **self.character_settings()}
+            with self.store.db:
+                self.store.put("image_settings", saved)
+        for key in CHARACTER_FIELDS:
+            setattr(config.diary, key, saved[key])
         with self.store.db:
             for category in ("diary", "diary_publication", "experience_image", "image_test"):
                 for row in self.store.all(category):
                     if row.get("image_status") == "生成中":
                         row.update(image_status="生成失败", image_error="配图已中断，可以重新生成")
                         self.store.put(category, row)
+
+    def character_settings(self):
+        return {key: getattr(self.config.diary, key) for key in CHARACTER_FIELDS}
+
+    def save_character(self, values):
+        if set(values) - set(CHARACTER_FIELDS):
+            raise ValueError("这里只保存角色卡、画风和图片用途")
+        config = self.config.diary
+        updated = type(config).model_validate({**config.model_dump(), **values})
+        settings = {key: getattr(updated, key) for key in CHARACTER_FIELDS}
+        with self.store.db:
+            self.store.put("image_settings", {"id": "character", **settings})
+        for key, value in settings.items():
+            setattr(config, key, value)
+        return {"message": "角色与图片设置已保存，新生成的图片会采用这些设置。"}
 
     def instruction(self):
         text = IMAGE_INSTRUCTION
@@ -95,44 +123,159 @@ class DiaryImages:
                   + json.dumps(personality, ensure_ascii=False)[:6000])
         return await generate(self.ctx, self.store, self.config, "配图提示词", prompt, CharacterDraft)
 
+    @property
+    def reference_path(self):
+        return Path(self.ctx.paths.data_dir) / "character_reference.jpg"
+
+    def reference_source(self):
+        return self.reference_path if self.reference_path.exists() else self.config.diary.image_character_reference_url.strip()
+
+    def reference_view(self):
+        path = self.reference_path
+        return {"uploaded": path.exists(), "preview": "data:image/jpeg;base64," + base64.b64encode(path.read_bytes()).decode() if path.exists() else "",
+                "url": self.config.diary.image_character_reference_url, "enabled": self.config.diary.image_character_enabled and self.config.diary.image_character_reference_enabled,
+                "protocol": self.config.diary.image_reference_protocol, "model": self.config.diary.image_model}
+
+    def upload_reference(self, content):
+        data = base64.b64decode(content, validate=True)
+        if len(data) > 512 * 1024:
+            raise ValueError("参考图请压缩到 512 KiB 以内")
+        with Image.open(io.BytesIO(data)) as picture:
+            picture.thumbnail((1024, 1024))
+            output = io.BytesIO()
+            picture.convert("RGB").save(output, format="JPEG", quality=88)
+        self.reference_path.write_bytes(output.getvalue())
+        return {"message": "参考图已保存，空间和聊天共用；新的人物图片会采用这张参考图。"}
+
+    def reference_upload(self, action, content=""):
+        temporary = self.reference_path.with_suffix(".upload")
+        if action == "begin":
+            temporary.write_bytes(b"")
+        elif action == "append":
+            chunk = base64.b64decode(content, validate=True)
+            if temporary.stat().st_size + len(chunk) > 512 * 1024:
+                raise ValueError("参考图请压缩到 512 KiB 以内")
+            with temporary.open("ab") as output:
+                output.write(chunk)
+        elif action == "finish":
+            result = self.upload_reference(base64.b64encode(temporary.read_bytes()).decode())
+            temporary.unlink()
+            return result
+        elif action == "abort":
+            temporary.unlink(missing_ok=True)
+        return {"message": "参考图上传中"}
+
+    def remove_reference(self):
+        self.reference_path.unlink(missing_ok=True)
+        return {"message": "上传的参考图已移除。"}
+
+    def separate_negative(self):
+        config = self.config.diary
+        return config.image_reference_protocol == "DashScope 多模态" and not config.image_model.startswith(("qwen-image-2.1", "wan2.7-"))
+
+    def request_endpoint(self, reference=False):
+        protocol = self.config.diary.image_reference_protocol
+        if protocol == "OpenAI Chat 生图":
+            return "/chat/completions"
+        if protocol == "Gemini 原生":
+            return f"/v1beta/models/{self.config.diary.image_model}:generateContent"
+        if protocol == "DashScope 多模态":
+            return "/api/v1/services/aigc/multimodal-generation/generation"
+        return "/images/edits" if reference and protocol == "OpenAI 图片编辑" else "/images/generations"
+
     def request(self, prompt, reference=""):
         config = self.config.diary
         payload = {"model": config.image_model, "prompt": prompt, "n": 1, "size": "1024x768"}
-        endpoint = "/images/generations"
+        endpoint = self.request_endpoint(bool(reference))
+        reference_data = ""
         content_type = "application/json"
         data = json.dumps(payload).encode()
         if reference:
-            if not reference.startswith(("http://", "https://")):
-                raise ValueError("参考图片地址请填写 HTTP(S) 图片直链")
-            with urlopen(reference, timeout=self.download_timeout) as response:
-                original = response.read()
+            if isinstance(reference, Path):
+                original = reference.read_bytes()
+            else:
+                if not reference.startswith(("http://", "https://")):
+                    raise ValueError("参考图片地址请填写 HTTP(S) 图片直链")
+                with urlopen(reference, timeout=self.download_timeout) as response:
+                    original = response.read()
             with Image.open(io.BytesIO(original)) as picture:
                 output = io.BytesIO()
                 picture.convert("RGB").save(output, format="PNG")
-            boundary = "maiweave-" + uuid4().hex
-            parts = []
-            for key, value in payload.items():
-                parts.append((f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n').encode())
-            parts.append((f'--{boundary}\r\nContent-Disposition: form-data; name="image"; filename="character.png"\r\nContent-Type: image/png\r\n\r\n').encode() + output.getvalue() + b"\r\n")
-            data = b"".join(parts) + f"--{boundary}--\r\n".encode()
-            endpoint = "/images/edits"
-            content_type = "multipart/form-data; boundary=" + boundary
-        request = Request(config.image_base_url.rstrip('/') + endpoint, data=data,
-                          headers={"Authorization": "Bearer " + config.image_api_key, "Content-Type": content_type})
+            reference_data = base64.b64encode(output.getvalue()).decode()
+            if config.image_reference_protocol == "通义千问兼容接口":
+                payload["image"] = "data:image/png;base64," + base64.b64encode(output.getvalue()).decode()
+                data = json.dumps(payload).encode()
+            elif config.image_reference_protocol == "OpenAI 图片编辑":
+                boundary = "maiweave-" + uuid4().hex
+                parts = []
+                for key, value in payload.items():
+                    parts.append((f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n').encode())
+                parts.append((f'--{boundary}\r\nContent-Disposition: form-data; name="image"; filename="character.png"\r\nContent-Type: image/png\r\n\r\n').encode() + output.getvalue() + b"\r\n")
+                data = b"".join(parts) + f"--{boundary}--\r\n".encode()
+                endpoint = "/images/edits"
+                content_type = "multipart/form-data; boundary=" + boundary
+        headers = {"Authorization": "Bearer " + config.image_api_key, "Content-Type": content_type}
+        protocol = config.image_reference_protocol
+        if protocol == "OpenAI Chat 生图":
+            content = [{"type": "text", "text": "请生成一张 4:3 横向图片。" + prompt}]
+            if reference_data:
+                content.append({"type": "image_url", "image_url": {"url": "data:image/png;base64," + reference_data}})
+            data = json.dumps({"model": config.image_model, "messages": [{"role": "user", "content": content}]}).encode()
+        elif protocol == "Gemini 原生":
+            parts = [{"text": prompt}]
+            if reference_data:
+                parts.append({"inlineData": {"mimeType": "image/png", "data": reference_data}})
+            data = json.dumps({"contents": [{"role": "user", "parts": parts}],
+                               "generationConfig": {"responseModalities": ["TEXT", "IMAGE"],
+                                                    "imageConfig": {"aspectRatio": "4:3"}}}).encode()
+            headers = {"x-goog-api-key": config.image_api_key, "Content-Type": "application/json"}
+        elif protocol == "DashScope 多模态":
+            content = [{"text": prompt}]
+            if reference_data:
+                content.append({"image": "data:image/png;base64," + reference_data})
+            parameters = {"n": 1, "size": "1024*768"}
+            if config.image_negative_prompt.strip() and self.separate_negative():
+                parameters["negative_prompt"] = config.image_negative_prompt.strip()
+            data = json.dumps({"model": config.image_model, "input": {"messages": [{"role": "user", "content": content}]},
+                               "parameters": parameters}).encode()
+        request = Request(config.image_base_url.rstrip('/') + endpoint, data=data, headers=headers)
         try:
             with urlopen(request, timeout=self.request_timeout) as response:
                 result = json.load(response)
         except HTTPError as error:
-            if reference and error.code in {404, 405}:
-                raise RuntimeError("当前图片生成服务未提供参考图接口 /images/edits，请更换支持此接口的服务或关闭角色参考图") from error
-            raise RuntimeError(f"图片生成服务返回 HTTP {error.code}：{error.read().decode('utf-8', errors='replace')[:1000]}") from error
-        item = result["data"][0]
+            raise RuntimeError(f"图片生成服务 {endpoint} 返回 HTTP {error.code}：{error.read().decode('utf-8', errors='replace')[:1000]}") from error
+        tokens = result.get("usage", {})
+        if protocol == "Gemini 原生":
+            parts = result.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+            item = next(({"b64_json": part["inlineData"]["data"]} for part in parts if "inlineData" in part), {})
+            usage = result.get("usageMetadata", {})
+            tokens = {"input_tokens": usage.get("promptTokenCount"), "output_tokens": usage.get("candidatesTokenCount"),
+                      "total_tokens": usage.get("totalTokenCount")}
+        elif protocol == "DashScope 多模态":
+            output = result.get("output", {})
+            parts = output.get("choices", [{}])[0].get("message", {}).get("content", [])
+            item = next(({"url": part["image"]} for part in parts if "image" in part), {})
+        elif protocol == "OpenAI Chat 生图":
+            message = result.get("choices", [{}])[0].get("message", {})
+            content = message.get("content") or ""
+            parts = message.get("images", []) + (content if isinstance(content, list) else [])
+            item = next(({"url": part["image_url"]["url"]} for part in parts if "image_url" in part), {})
+            if not item and isinstance(content, str):
+                match = re.search(r"data:image/[\w.+-]+;base64,[A-Za-z0-9+/=]+|!\[[^\]]*\]\((https?://[^\s)]+)\)", content)
+                if match:
+                    item = {"url": match.group(1) or match.group(0)}
+        else:
+            item = result.get("data", [{}])[0]
         if item.get("b64_json"):
             data = base64.b64decode(item["b64_json"], validate=True)
-        else:
+        elif item.get("url", "").startswith("data:image/"):
+            data = base64.b64decode(item["url"].split(",", 1)[1], validate=True)
+        elif item.get("url"):
             with urlopen(item["url"], timeout=self.download_timeout) as response:
                 data = response.read()
-        return data, result.get("usage", {})
+        else:
+            raise ValueError("图片生成服务未返回图片：" + str(result.get("error") or result.get("message") or "请检查模型与接口格式"))
+        return data, tokens
 
     async def illustrate(self, category, day, now, prompt=""):
         if not self.config.diary.image_service_enabled:
@@ -171,15 +314,15 @@ class DiaryImages:
             style = config.chat_image_style if category == "experience_image" else config.image_style
             character = self.character_prompt(row.get("image_character_visible", False)) if category != "image_test" else ""
             full_prompt = prompt + ("\n" + character if character else "") + "\n画面风格：" + style
-            if config.image_negative_prompt.strip():
+            if config.image_negative_prompt.strip() and not self.separate_negative():
                 full_prompt += "\n负面提示词（画面中避免）：" + config.image_negative_prompt.strip()
             reference = ""
             if config.image_character_enabled and config.image_character_reference_enabled and row.get("image_character_visible") and category != "image_test":
-                reference = config.image_character_reference_url.strip()
+                reference = self.reference_source()
                 if not reference:
-                    raise ValueError("请在麦麦角色卡中填写参考图片地址")
-                full_prompt += "\n参考图用于保持麦麦的外貌，动作、场景和构图按本次画面描述，穿着结合当前活动。"
-                usage["task"] = "images/edits"
+                    raise ValueError("请在角色与图片页面上传参考图，或填写图片直链")
+                full_prompt += "\n人物外貌以参考图为准，包括脸部、发型、发色和眼睛；文字角色卡补充参考图未体现的细节。动作、场景和构图按本次画面描述，穿着结合当前活动。"
+            usage["task"] = self.request_endpoint(bool(reference)).lstrip("/")
             data, tokens = await asyncio.to_thread(self.request, full_prompt, reference) if reference else await asyncio.to_thread(self.request, full_prompt)
             if len(data) > self.config.retention.image_max_mb * 1024 * 1024:
                 raise ValueError("生成的图片超过配图容量上限，请调整容量设置")
