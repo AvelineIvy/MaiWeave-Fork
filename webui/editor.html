@@ -239,7 +239,7 @@ async function renderPrivateDiaryImage(dialog,row){
  const section=document.createElement('section'),title=document.createElement('h3'),label=document.createElement('label'),prompt=document.createElement('textarea'),preview=document.createElement('img'),status=document.createElement('p'),actions=document.createElement('div');
  title.textContent='日记配图';label.textContent='画面描述（可修改，选填）';prompt.className='maibot-input';prompt.rows=3;prompt.maxLength=1200;label.append(prompt);preview.alt='这篇日记的配图';preview.style.cssText='display:block;max-width:100%;max-height:360px;object-fit:contain;margin:16px auto;border-radius:10px';actions.className='actions';section.append(title,label,preview,status,actions);dialog.append(section);
  let state;const buttons=[];
- async function load(){state=await maibot.query('diary_publication',{day:row.id,scope:'diary'});prompt.value=state.record.image_prompt||'';preview.hidden=!state.image;if(state.image)preview.src=state.image;else preview.removeAttribute('src');status.textContent=state.record.image_error||state.record.image_status||'选一个今天想留住的画面。';const busy=state.record.image_status==='生成中'||state.record.status==='生成中';for(const b of buttons)b.disabled=busy||state.record.status!=='已生成';buttons[1].disabled=busy||!state.image;prompt.disabled=busy}
+ async function load(){state=await maibot.query('diary_publication',{day:row.id,scope:'diary'});prompt.value=state.record.image_prompt||'';preview.hidden=!state.image;if(state.image)preview.src=state.image;else preview.removeAttribute('src');status.textContent=state.record.image_error||state.record.image_status||(state.image_service_enabled===false?'生图服务已关闭，可在模型设置开启。':'选一个今天想留住的画面。');const busy=state.record.image_status==='生成中'||state.record.status==='生成中';for(const b of buttons)b.disabled=busy||state.record.status!=='已生成';buttons[0].disabled=buttons[0].disabled||state.image_service_enabled===false;buttons[1].disabled=busy||!state.image;prompt.disabled=busy}
  for(const [action,text] of [['image','生成 / 更换配图'],['remove_image','移除配图']]){const button=document.createElement('button');button.className='maibot-button';button.textContent=text;buttons.push(button);actions.append(button);button.onclick=()=>run(async()=>{for(const b of buttons)b.disabled=true;try{await tracked(button,text,async show=>waitOperation(await maibot.action('diary_publish_action',{action,day:row.id,scope:'diary',image_prompt:prompt.value}),show))}finally{await load()}})}
  await load();
 }
@@ -255,7 +255,7 @@ async function renderDiaryPublication(dialog,row){
   const pending=state.record.status==='待核对',published=state.record.status==='已发布',busy=working||(['生成中','发布中'].includes(state.record.status)||state.record.image_status==='生成中');
   text.disabled=busy||published||pending;
   buttons.check.disabled=busy;buttons.generate.disabled=busy||published||pending||row.status!=='已生成';buttons.save.disabled=busy||published||pending||!text.value.trim();
-  for(const key of ['image','remove_image'])buttons[key].disabled=busy||published||pending||(key==='image'&&!text.value.trim())||(key==='remove_image'&&!state.image&&state.record.image_status!=='生成失败');
+  for(const key of ['image','remove_image'])buttons[key].disabled=busy||published||pending||(key==='image'&&(!text.value.trim()||state.image_service_enabled===false))||(key==='remove_image'&&!state.image&&state.record.image_status!=='生成失败');
   models.disabled=busy||published||pending;
   buttons.publish.disabled=busy||published||pending||!text.value.trim()||state.mode==='关闭';
   for(const key of ['confirm_published','confirm_unpublished']){buttons[key].hidden=!pending;buttons[key].disabled=busy}
@@ -266,7 +266,7 @@ async function renderDiaryPublication(dialog,row){
   const visibility=['已发布','发布中','待核对'].includes(state.record.status)?state.record.visibility||state.visibility:state.visibility;
   status.textContent=`${state.mode} · ${visibility}可见 · ${state.record.status||'尚未生成文案'}`+(state.record.error?` · ${state.record.error}`:'')+(state.record.published_at?` · 发布时间：${state.record.published_at.replace('T',' ').slice(0,19)}`:'');
   preview.hidden=!state.image;if(state.image)preview.src=state.image;else preview.removeAttribute('src');
-  imageInfo.textContent=state.record.image_error||state.record.image_status||(state.image_enabled?'已开启自动配图。':'可以先写好文案，再生成一张配图。');
+  imageInfo.textContent=state.record.image_error||state.record.image_status||(state.image_service_enabled===false?'生图服务已关闭，可在模型设置开启。':state.image_enabled?'已开启自动配图。':'可以先写好文案，再生成一张配图。');
   connection.textContent=state.connection.status+(state.connection.error?' · '+state.connection.error:'')+(state.connection.account?' · QQ '+state.connection.account:'');controls();
  }
  text.oninput=controls;
@@ -529,4 +529,13 @@ $('intro').textContent=pageIntro[maibot.page.id];document.title=$('heading').tex
 const nav=document.createElement('nav');nav.className='page-nav';nav.setAttribute('aria-label','生活页面');for(const [id,title] of [["overview", "此刻生活"], ["schedule", "日程与作息"], ["anniversaries", "人物与纪念日"], ["records", "经历与记忆"], ["continuity", "成长与接续"], ["books", "书架与阅读"], ["diary", "日记与梦境"], ["world", "天气与见闻"], ["space", "地点与移动"], ["usage", "模型用量"]]){const button=document.createElement('button');button.className='maibot-button';button.textContent=title;if(id===maibot.page.id)button.setAttribute('aria-current','page');button.onclick=()=>maibot.navigate(id);nav.append(button)}document.querySelector('header').after(nav);
 if(maibot.page.id==='world')setInterval(()=>{if($('saveActivity').hidden&&!document.querySelector('dialog[open]')&&!document.activeElement?.matches('input,select'))run(renderView)},15000);
 await run(async()=>{if(category){chatChoices=(await maibot.query('chats')).items;await refresh()}if(pageMeta.view)await renderView();message('')});
-</script></body></html>
+</script>
+
+<script>
+(async()=>{await maibot.ready;if(maibot.page.id!=='records')return;
+const panel=document.createElement('details');panel.className='panel';const title=document.createElement('summary');title.textContent='最近的生活图片（最多四张）';panel.append(title);document.querySelector('main')?.after(panel);
+panel.addEventListener('toggle',async()=>{if(!panel.open)return;try{const data=await maibot.query('life_images');while(panel.children.length>1)panel.lastChild.remove();for(const item of data.items){const card=document.createElement('div');card.className='view-card';const text=document.createElement('p');text.textContent=item.status+' · '+item.description;card.append(text);if(item.image){const img=document.createElement('img');img.src=item.image;img.alt=item.description;img.style.cssText='max-width:100%;max-height:240px;border-radius:8px';card.append(img)}const sent=document.createElement('p');sent.textContent=data.deliveries.filter(row=>row.experience_id===item.id).map(row=>row.at.slice(0,19).replace('T',' ')+' · '+row.status+(row.error?' · '+row.error:'')).join('；');card.append(sent);panel.append(card)}}catch(error){const p=document.createElement('p');p.textContent=error.message;panel.append(p)}});
+})();
+</script>
+
+</body></html>

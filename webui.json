@@ -832,6 +832,11 @@
         "retention": {
           "api": "ui_retention",
           "version": "1"
+        },
+        "life_images": {
+          "api": "ui_life_images",
+          "parameters": {},
+          "version": "1"
         }
       },
       "actions": {

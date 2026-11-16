@@ -50,7 +50,8 @@
     "person.get_id",
     "llm.get_available_models",
     "maisaka.reply.generate",
-    "api.call"
+    "api.call",
+    "send.image"
   ],
   "i18n": {
     "default_locale": "zh-CN",

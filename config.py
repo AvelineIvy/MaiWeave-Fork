@@ -125,10 +125,12 @@ class DiaryConfig(PluginConfigBase):
 
     __ui_label__ = "生活日记"
     publish_mode: Literal["关闭", "手动发布", "日记完成后自动发布"] = setting("日记发空间", default="关闭", description="通过已连接的 SnowLuma 发布生活随笔和可选配图。自动模式在写日记日程结束后发布当天日记，每天一篇。")
+    image_service_enabled: bool = setting("启用生图服务", default=False, description="控制新图片生成；已有图片仍可查看。关闭后文字日记、空间文案与聊天照常运行。")
+    chat_images_enabled: bool = setting("聊天中展示生活图片", default=False, description="允许追问时发图，以及主动分享时由模型选择配图；同一经历复用已保存图片。")
     image_enabled: bool = setting("自动配图", default=False, description="日记和空间文案写好后，各生成一张生活插画；关闭时可在详情中手动生成。")
     image_base_url: str = setting("生图接口地址（生图必填）", default="https://api.openai.com/v1", description="填写支持 OpenAI 图片生成接口的服务地址，包含 /v1；插件调用 /images/generations。")
     image_api_key: str = setting("生图 API Key（生图必填）", default="", description="填写生图服务提供的密钥。", json_schema_extra={"x-widget": "password", "input_type": "password"})
-    image_model: str = setting("生图模型（生图必填）", default="gpt-image-1", description="填写服务实际支持的图片生成模型名称。每次生成一张 1024×1024 图片。")
+    image_model: str = setting("生图模型（生图必填）", default="gpt-image-1", description="填写服务实际支持的图片生成模型名称。每次生成一张横向 4:3、1024×768 图片。")
     image_style: str = setting("配图风格（选填）", default="温暖的手绘生活插画，柔和色彩，有日记感", description="生成画面时使用的整体风格，可按喜好修改。", max_length=800)
     publish_visibility: Literal["所有人", "好友", "仅自己"] = setting("空间可见范围", default="好友", description="生成文案后可在日记详情预览、编辑和发布。")
     enabled: bool = setting("自动写日记", default=True, description="由生活规划模型安排写日记的时间，进入活动窗口后回顾当天生活")
@@ -140,7 +142,7 @@ class BooksConfig(PluginConfigBase):
     session_minutes: int = setting("单次自主阅读上限（分钟）", default=40, ge=10, le=120, description="每次自主安排阅读的最长时间，实际时长结合内容、精力和空闲时间选择。")
     break_minutes: int = setting("自主阅读间隔（分钟）", default=60, ge=0, le=1440, description="上次阅读结束后，隔多久可以再次自主安排阅读；0 表示不设间隔。")
     max_books: int = setting("最多书籍数", default=100, ge=1, le=1000, description="包含已归档书籍；删除书籍可释放名额。")
-    storage_mb: int = setting("书架文件总容量（MB）", default=200, ge=1, le=10240, description="计算原始文件、解析后的正文和上传中的文件。")
+    storage_mb: int = setting("书架文件总容量（MB）", default=500, ge=1, le=10240, description="计算原始文件、解析后的正文和上传中的文件。")
     max_file_mb: int = setting("单本文件容量（MB）", default=20, ge=1, le=100, description="同时作为 EPUB 解压内容上限，正文解析后还会检查书架总容量。")
     reading_chars: int = setting("每次阅读正文上限（字）", default=4000, ge=500, le=12000, description="每次读取当前位置的一段正文，下次从保存的位置继续。")
     context_chars: int = setting("对话书架信息上限（字符）", default=4000, ge=1000, le=16000, description="限制书目和近期笔记带入对话的总长度；详细笔记可按书查询。")
@@ -175,9 +177,9 @@ class RetentionConfig(PluginConfigBase):
 
     __ui_label__ = "数据保留"
     enabled: bool = setting("每日自动清理", default=True, description="每天清理一次；经历与记忆页面可预览数量和立即清理。")
-    image_days: int = setting("日记配图保留天数", default=90, ge=1, description="日记与空间配图共用，超期清理图片，正文和发布记录继续保留。")
-    image_count: int = setting("日记配图数量上限", default=200, ge=1, description="两类配图合计，超出后从最旧的图片开始清理。")
-    image_max_mb: int = setting("日记配图容量上限（MiB）", default=512, ge=1, description="配图原文件的总容量；每次生成后检查上限，每日清理同时处理过期图片和遗留文件。")
+    image_days: int = setting("生活图片保留天数", default=90, ge=1, description="日记、空间与聊天图片共用，超期清理图片，正文和发布记录继续保留。")
+    image_count: int = setting("生活图片数量上限", default=500, ge=1, description="三类图片合计，超出后从最旧的图片开始清理。")
+    image_max_mb: int = setting("生活图片容量上限（MiB）", default=1024, ge=1, description="配图原文件的总容量；每次生成后检查上限，每日清理同时处理过期图片和遗留文件。")
     log_days: int = setting("运行记录保留天数", default=7, ge=0, description="主动交流回执、已结束任务、资料核对、情绪变化及已结束跟进记录；0 表示按数量管理。")
     log_count: int = setting("每类运行记录上限", default=1000, ge=0, description="每类分别计数；0 表示按天数管理，两项均为 0 时长期保留。")
     usage_days: int = setting("模型调用明细保留天数", default=30, ge=0, description="Token 统计按保留的明细汇总；0 表示按数量管理。")

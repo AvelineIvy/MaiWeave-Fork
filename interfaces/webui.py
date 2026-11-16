@@ -45,6 +45,16 @@ def plan_row(plan):
 
 
 class WebUI:
+    @API("ui_life_images", description="查看生活图片和发送记录")
+    async def ui_life_images(self) -> dict:
+        rows = self.store.all("experience_image")[-4:]
+        return {"enabled": self.config.diary.chat_images_enabled,
+                "service_enabled": self.config.diary.image_service_enabled,
+                "items": [{"id": row["id"], "status": row.get("image_status", "尚未生成"),
+                           "description": row.get("image_prompt", ""),
+                           "image": await asyncio.to_thread(self.life_images.images.preview, row, 256)} for row in reversed(rows)],
+                "deliveries": list(reversed(self.store.all("image_delivery")[-20:]))}
+
     @API("ui_retention", description="预览数据保留与预计清理数量")
     async def ui_retention(self) -> dict:
         return self.retention.preview(self.now())
@@ -184,7 +194,7 @@ class WebUI:
     async def ui_diary_publication(self, day: str, scope: str = "publication") -> dict:
         if scope == "diary":
             row = self.store.get("diary", day)
-            return {"record": {k: v for k, v in row.items() if k != "material"}, "image": await asyncio.to_thread(self.diary.images.preview, row)}
+            return {"record": {k: v for k, v in row.items() if k != "material"}, "image": await asyncio.to_thread(self.diary.images.preview, row), "image_service_enabled": self.config.diary.image_service_enabled}
         return await self.diary_publisher.view(day)
 
     @API("ui_diary_publish_action", description="生成、编辑和发布日记空间文案")

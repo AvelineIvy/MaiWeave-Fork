@@ -86,6 +86,7 @@ class Retention:
             delete[category] = select(rows, cfg.log_days, cfg.log_count, field, protected)
             summary.append(dict(category=category, label=label, total=len(rows), days=cfg.log_days, limit=cfg.log_count, protected=len(protected), remove=len(delete[category])))
         for category, label, field, days, count in (
+            ("image_delivery", "生活图片发送记录", "at", cfg.log_days, cfg.log_count),
             ("model_usage", "模型调用明细", "at", cfg.usage_days, cfg.usage_count),
             ("emotion", "情绪变化", "at", cfg.log_days, cfg.log_count),
             ("chat_arrangement", "聊天约定", "expires_at", cfg.log_days, cfg.log_count),
@@ -166,6 +167,10 @@ class Retention:
         delete, histories, summary = self.collect(now)
         store = self.store
         self.images.clean(now)
+        with store.db:
+            for row in store.all("experience_image"):
+                if not row.get("image_file") and row.get("image_status") != "生成中" and not store.find("experience", row["id"]):
+                    store.delete("experience_image", row["id"])
         with store.db:
             for row in self.sharing_updates.values():
                 if row["notice_ids"] or row["experience_ids"]:

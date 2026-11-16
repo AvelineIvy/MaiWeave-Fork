@@ -28,7 +28,7 @@ class DiaryPublisher:
     async def view(self, day):
         row = self.store.find("diary_publication", day) or {}
         image = await asyncio.to_thread(self.images.preview, row)
-        return {"record": row, "image": image, "image_enabled": self.config.diary.image_enabled, "connection": self.connection,
+        return {"record": row, "image": image, "image_enabled": self.config.diary.image_enabled and self.config.diary.image_service_enabled, "image_service_enabled": self.config.diary.image_service_enabled, "connection": self.connection,
                 "mode": self.config.diary.publish_mode, "visibility": self.config.diary.publish_visibility}
 
     def put(self, row):
@@ -87,7 +87,7 @@ class DiaryPublisher:
                       "活动完成情况、阅读进度及具体事实沿用素材，进行中的事情写当前进展。"
                       f"日期：{day}；角色：{dump(brief(personality, 1500, 6))}；"
                       f"素材：{dump(public)}")
-            if self.config.diary.image_enabled:
+            if self.config.diary.image_service_enabled and self.config.diary.image_enabled:
                 result = await generate(self.ctx, self.store, self.config, "空间文案", prompt.replace("直接返回正文。", "") + IMAGE_INSTRUCTION, IllustratedText)
                 row.update(content=result.content.strip(), image_prompt=result.image_prompt, status="草稿")
             else:
@@ -98,7 +98,7 @@ class DiaryPublisher:
             for key in list(row):
                 if key.startswith("image_") and key != "image_prompt":
                     row.pop(key)
-            if not self.config.diary.image_enabled:
+            if not (self.config.diary.image_service_enabled and self.config.diary.image_enabled):
                 row.pop("image_prompt", None)
         except asyncio.CancelledError:
             row.update(status="生成失败", error="文案生成已中断，可以重新生成")
@@ -108,7 +108,7 @@ class DiaryPublisher:
             raise
         finally:
             self.put(row)
-        if self.config.diary.image_enabled:
+        if self.config.diary.image_service_enabled and self.config.diary.image_enabled:
             return await self.illustrate(day, now)
         return row
 

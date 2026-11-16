@@ -23,7 +23,7 @@ async def plugin(tmp_path):
     context = SimpleNamespace(message=SimpleNamespace(get_by_time_in_chat=AsyncMock(return_value=[])), person=SimpleNamespace(get_id=AsyncMock(side_effect=lambda platform, user_id: platform + ":" + user_id)),
                               chat=SimpleNamespace(get_all_streams=AsyncMock(return_value=[{"stream_id": name, "platform": "qq"} for name in ["a", "chat-a", "group", "private"]])),
                               paths=SimpleNamespace(data_dir=tmp_path), logger=logging.getLogger("test"),
-                              send=SimpleNamespace(text=AsyncMock(return_value=True)),
+                              send=SimpleNamespace(text=AsyncMock(return_value=True), image=AsyncMock(return_value={"sent": True, "message_id": "image-1"})),
                               config=SimpleNamespace(get=AsyncMock(return_value={"personality": "喜欢安静"})),
                               llm=SimpleNamespace(get_available_models=AsyncMock(return_value=["utils", "replyer", "planner"]), generate=AsyncMock(return_value={"success": False, "error": "测试尚未设置模型结果"})),
                               db=SimpleNamespace(get=AsyncMock(return_value=None)),

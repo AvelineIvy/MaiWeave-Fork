@@ -74,6 +74,8 @@ class ShareReceipts:
             "对方尚未回应时留出空间；重要度用于候选排序。reason说明与本次对象有关的发送或等待缘由。"
             f"当前时间={now.isoformat()}。"
         )
+        if config.diary.chat_images_enabled and config.diary.image_service_enabled:
+            guide += "image 为是否配图，适合展示具体完成的手工、饭菜或眼前景物时可为true，问候、提醒和抽象感受为false。"
         budget = config.context.group_chars if recipient["场景"] == "群聊" else config.context.private_chars
         labels = ("\n本次分享：", "\n接收对象：", "\n相关记忆：", "\n最近聊天：")
         available = budget - len(guide) - sum(map(len, labels))

@@ -836,6 +836,7 @@ class Living:
             self.share_decisions.appendleft({"created": now.isoformat(), "at": now.strftime("%m-%d %H:%M:%S"), "session": session,
                                              "outcome": outcome, "reason": reason, "score": score, "mode": config.mode})
 
+        await self.share_images(now)
         greeting_window = self.greetings.window(now)
         ordinary_hours = in_hours(now.hour, config.start_hour, config.end_hour)
         if not ordinary_hours and not greeting_window:
@@ -984,6 +985,7 @@ class Living:
                 row.update(greeting_key=greeting["key"], greeting_kind=greeting["kind"],
                            greeting_until=greeting["until"], score="作息问候，按近期互动与关系判断")
             if not notices:
+                row["image_requested"] = decision.image and self.config.diary.chat_images_enabled and self.config.diary.image_service_enabled
                 row["share_reason"] = decision.reason
                 if not decision.send:
                     row["topic"] = "；".join(item["summary"][:100] for item in candidates)
@@ -1010,3 +1012,26 @@ class Living:
                     raise
                 self.receipts.accept(result["task_id"], row, now)
             self.settle_shares()
+            await self.share_images(now)
+
+
+    async def share_images(self, now):
+        if not self.config.diary.chat_images_enabled or not hasattr(self, "images"):
+            return
+        for row in self.engine.store.all("share_receipt"):
+            if not row.get("image_requested") or row.get("image_delivery") or row["outcome"] != "实际已发送":
+                continue
+            row["image_delivery"] = "发送中"
+            with self.engine.store.db:
+                self.engine.store.put("share_receipt", row)
+            try:
+                result = await self.images.send(row["experience_id"], row["session"], now, share_id=row["id"])
+                row.update(image_delivery="已发送", image_message_id=result["message_id"])
+            except Exception as error:
+                row.update(image_delivery="发送失败", image_error=str(error))
+                self.ctx.logger.exception("主动分享配图失败")
+            finally:
+                with self.engine.store.db:
+                    latest = self.engine.store.get("share_receipt", row["id"])
+                    latest.update({key: value for key, value in row.items() if key.startswith("image_")})
+                    self.engine.store.put("share_receipt", latest)

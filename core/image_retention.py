@@ -10,7 +10,7 @@ class ImageRetention:
 
     def collect(self, now):
         cfg = self.config.retention
-        records = [(category, row) for category in ("diary", "diary_publication")
+        records = [(category, row) for category in ("diary", "diary_publication", "experience_image")
                    for row in self.store.all(category)]
         refs = {Path(row["image_file"]).name: (category, row) for category, row in records if row.get("image_file")}
         busy = {name for name, (_, row) in refs.items()
@@ -31,7 +31,7 @@ class ImageRetention:
                 removed.add(path)
                 count -= 1
                 size -= sizes[path]
-        summary = dict(category="diary_images", label="日记与空间配图", total=len(files),
+        summary = dict(category="diary_images", label="日记、空间与聊天图片", total=len(files),
                        days=cfg.image_days, limit=cfg.image_count, protected=len(busy), remove=len(removed),
                        policy=f"{cfg.image_days} 天 / {cfg.image_max_mb} MiB，当前 {sum(sizes.values()) / 1024 / 1024:.1f} MiB")
         return removed, refs, summary

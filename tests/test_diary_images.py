@@ -16,6 +16,7 @@ PNG = buffer.getvalue()
 
 
 def service(p, monkeypatch):
+    p.config.diary.image_service_enabled = True
     p.config.diary.image_api_key = 'test-key'
     monkeypatch.setattr(type(p.diary.images), 'request', lambda self, prompt: (PNG, {'input_tokens': 20, 'output_tokens': 40, 'total_tokens': 60}))
 

@@ -77,7 +77,7 @@ async def test_image_configuration_and_model_schema_are_independent(plugin):
     first = plugin.get_webui_config_schema()
     second = plugin.get_webui_config_schema()
     assert first == second
-    assert first["sections"]["diary"]["fields"]["image_api_key"]["ui_type"] == "password"
+    assert first["sections"]["image_service"]["fields"]["image_api_key"]["ui_type"] == "password"
     assert "当前使用：replyer" in first["sections"]["model_expression"]["fields"]["diary"]["hint"]
     await _once(plugin.ctx, plugin.store, plugin.config, "生活日记", "写日记")
     assert plugin.ctx.llm.generate.call_args.kwargs["task_name"] == "replyer"

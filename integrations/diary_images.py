@@ -30,7 +30,7 @@ class DiaryImages:
     def __init__(self, engine, context, config):
         self.store, self.ctx, self.config = engine.store, context, config
         with self.store.db:
-            for category in ("diary", "diary_publication"):
+            for category in ("diary", "diary_publication", "experience_image"):
                 for row in self.store.all(category):
                     if row.get("image_status") == "生成中":
                         row.update(image_status="生成失败", image_error="配图已中断，可以重新生成")
@@ -47,8 +47,8 @@ class DiaryImages:
             image.convert("RGB").save(output, format="JPEG", quality=80)
         return base64.b64encode(output.getvalue()).decode()
 
-    def preview(self, row):
-        return "data:image/jpeg;base64," + self.encoded(row) if row.get("image_file") else ""
+    def preview(self, row, size=512):
+        return "data:image/jpeg;base64," + self.encoded(row, size) if row.get("image_file") else ""
 
     def editable(self, category, day):
         row = self.store.get(category, day)
@@ -60,7 +60,7 @@ class DiaryImages:
 
     def request(self, prompt):
         config = self.config.diary
-        payload = {"model": config.image_model, "prompt": prompt, "n": 1, "size": "1024x1024"}
+        payload = {"model": config.image_model, "prompt": prompt, "n": 1, "size": "1024x768"}
         request = Request(config.image_base_url.rstrip('/') + '/images/generations',
                           data=json.dumps(payload).encode(),
                           headers={"Authorization": "Bearer " + config.image_api_key, "Content-Type": "application/json"})
@@ -78,10 +78,12 @@ class DiaryImages:
         return data, result.get("usage", {})
 
     async def illustrate(self, category, day, now, prompt=""):
+        if not self.config.diary.image_service_enabled:
+            raise ValueError("生图服务已关闭，请在模型设置中开启")
         row = self.editable(category, day)
         config = self.config.diary
         if not all(value.strip() for value in (config.image_base_url, config.image_api_key, config.image_model)):
-            raise ValueError("请在生活日记配置中填写生图接口地址、API Key 和模型")
+            raise ValueError("请在模型设置的生图服务中填写生图接口地址、API Key 和模型")
         prompt = prompt.strip() or row.get("image_prompt", "")
         if len(prompt) > 1200:
             raise ValueError("画面描述请控制在1200字以内")
@@ -89,7 +91,7 @@ class DiaryImages:
         self.put(category, row)
         started = perf_counter()
         usage = {"id": uuid4().hex, "at": datetime.now(ZoneInfo(self.config.life.timezone)).isoformat(),
-                 "feature": "日记配图", "task": "images/generations", "model": config.image_model,
+                 "feature": "生活图片" if category == "experience_image" else "日记配图", "task": "images/generations", "model": config.image_model,
                  "status": "失败", "error": "", "prompt_tokens": None, "completion_tokens": None,
                  "total_tokens": None, "prompt_cache_hit_tokens": None}
         try:
@@ -98,7 +100,8 @@ class DiaryImages:
                     IMAGE_INSTRUCTION + "正文沿用下面的内容，只补充画面描述：" + row["content"][:4000], IllustratedText)
                 prompt = idea.image_prompt
             row["image_prompt"] = prompt
-            data, tokens = await asyncio.to_thread(self.request, prompt + "\n画面风格：" + config.image_style)
+            style = "自然生活照片，随手拍的构图，自然光，具体物件清楚，横向4:3" if category == "experience_image" else config.image_style
+            data, tokens = await asyncio.to_thread(self.request, prompt + "\n画面风格：" + style)
             if len(data) > self.config.retention.image_max_mb * 1024 * 1024:
                 raise ValueError("生成的图片超过配图容量上限，请调整容量设置")
             if data.startswith(b"\x89PNG\r\n\x1a\n"):

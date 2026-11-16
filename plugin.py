@@ -17,6 +17,7 @@ from .config import MaiWeaveConfig
 from .core.engine import LifeEngine, read_life_status
 from .life.living import Living
 from .integrations.memory import NativeMemory
+from .integrations.life_images import LifeImages
 from .core.models import ExperienceInput, GoalInput, PlanInput, PlanPatch, RelationshipChange
 from .core.store import Store
 from .integrations.chat_context import ChatContext
@@ -78,6 +79,9 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
             ("quota", "proactive", "每日发送额度", "每日额度是最多发送次数，分享内容来自生活经历和待跟进事项。", ["daily_limit"]),
         ]
         groups += [
+            ('image_service', 'diary', '生图服务', '日记、空间与聊天共用此接口。', ['image_service_enabled', 'image_base_url', 'image_api_key', 'image_model', 'image_style']),
+            ('image_use', 'diary', '图片用途', '按用途开启，聊天展示采用自然生活照片风格。', ['chat_images_enabled', 'image_enabled']),
+            ('diary', 'diary', '生活日记', '安排写日记，整理空间随笔。', ['enabled', 'publish_mode', 'publish_visibility']),
             ('model_default', 'life', '默认生活模型', '各功能选择跟随默认时使用此任务。', ['model_task']),
             ('model_arrangement', 'models', '日常安排', '按功能选择 MaiBot 已配置的模型任务。', ['activity', 'diary_schedule', 'habits', 'goals']),
             ('model_expression', 'models', '阅读与表达', '设置活动感想、阅读、日记、梦境和空间文案使用的任务。', ['outcomes', 'reading', 'diary', 'dreams', 'qzone']),
@@ -125,7 +129,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         ]}
         advanced = ["planning", "world_updates", "rhythm_details", "dream_details", "followup_details", "retry_details", "reading_details", "books", "context_limits", "book_context", "retention", "plugin"]
         schema["layout"]["tabs"].extend([
-            {"id": "models", "title": "模型设置", "sections": ["model_default", "model_arrangement", "model_expression", "model_information"], "order": 5},
+            {"id": "models", "title": "模型设置", "sections": ["model_default", "model_arrangement", "model_expression", "model_information", "image_service", "image_use"], "order": 5},
             {"id": "advanced", "title": "高级设置", "sections": advanced, "order": 6},
         ])
         for key in advanced:
@@ -166,7 +170,9 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         self.diary_publisher = DiaryPublisher(self.engine, self.ctx, self.config)
         self.memory = NativeMemory(self.config.memory)
         self.continuity = Continuity(self.engine, self.ctx, self.config)
+        self.life_images = LifeImages(self.engine, self.ctx, self.config)
         self.living = Living(self.engine, self.ctx, self.config, self.spatial, self.rhythm, self.world, self.continuity, self.memory)
+        self.living.images = self.life_images
         self.spatial.check_influence = self.living.check_influence
         self.presence = self.living.presence
         self.living.apply_schedule(self.now())

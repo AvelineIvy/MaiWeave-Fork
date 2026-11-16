@@ -197,7 +197,7 @@ class Diary:
                 f"角色人格：{dump(brief(personality, 1500, 6))}；生活背景：{self.config.life.background[:1500]}；"
                 f"生活记录：{dump(writing_material(material))}"
             )
-            if self.config.diary.image_enabled:
+            if self.config.diary.image_service_enabled and self.config.diary.image_enabled:
                 result = await generate(self.ctx, store, self.config, "生活日记", prompt.replace("直接返回中文正文，", "") + IMAGE_INSTRUCTION, IllustratedText)
                 content = result.content.strip()
                 record["image_prompt"] = result.image_prompt
@@ -212,7 +212,7 @@ class Diary:
             for key in list(record):
                 if key.startswith("image_") and key != "image_prompt":
                     record.pop(key)
-            if not self.config.diary.image_enabled:
+            if not (self.config.diary.image_service_enabled and self.config.diary.image_enabled):
                 record.pop("image_prompt", None)
         except asyncio.CancelledError:
             record.update(status="生成失败", error="写作任务已中断", retry_at=(now + timedelta(minutes=5)).isoformat())
@@ -223,6 +223,6 @@ class Diary:
         finally:
             with store.db:
                 store.put("diary", record)
-        if self.config.diary.image_enabled:
+        if self.config.diary.image_service_enabled and self.config.diary.image_enabled:
             return await self.images.illustrate("diary", day.isoformat(), now)
         return record

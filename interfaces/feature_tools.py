@@ -16,6 +16,29 @@ def parameters(properties, required):
 
 
 class FeatureTools:
+    @Tool("maiweave_show_life", description="用户问刚做的东西是什么样、给我看看、发张照片时，展示对应生活经历的图片。list查询近期经历编号，send按experience_id生成或复用图片并发到当前聊天；已有图片直接发送；首次生成返回后台任务，完成后自动发送。画面与该经历保持一致。", parameters=parameters({
+        "action": {"type": "string", "enum": ["list", "send"]},
+        "experience_id": {"type": "string", "description": "要展示的生活经历编号"},
+    }, ["action"]))
+    async def show_life(self, action: str, experience_id: str = "", **kwargs):
+        self.require_life()
+        session = kwargs["stream_id"]
+        if action == "list":
+            return {"enabled": self.config.diary.chat_images_enabled, "items": self.life_images.candidates(session)}
+        if action != "send":
+            raise ValueError("请选择查询或发送图片")
+        self.engine.owned("experience", experience_id, session)
+        if not self.config.diary.chat_images_enabled:
+            raise ValueError("聊天图片已关闭")
+        row = self.store.find("experience_image", experience_id) or {}
+        if row.get("image_status") == "生成中":
+            return {"status": "正在生成，请稍等"}
+        if row.get("image_file"):
+            return await self.life_images.send(experience_id, session, self.now())
+        if not self.config.diary.image_service_enabled:
+            raise ValueError("生图服务已关闭")
+        return self.start_job("生成生活图片，完成后发送到当前聊天", self.life_images.send(experience_id, session, self.now()))
+
     @Tool("maiweave_chat_arrangement", description="保存聊天中已确定的角色本人临时安排，如调休、请假。填写适用时间、原话依据，调休blocked_kinds填work；更新同一事项传record_id，取消限制时填空blocked_kinds。cancel_plan_ids用于取消已有日程；plan_updates按plan_id和patch改期，沿用日程与出行逻辑。用户自己的作息使用maiweave_person_state。成功后再向用户确认安排。", parameters=parameters({"arrangement": ChatArrangement.model_json_schema()}, ["arrangement"]))
     async def chat_arrangement(self, arrangement: dict, **kwargs):
         self.require_life()
