@@ -14,6 +14,31 @@ def set_time(plugin, now):
         plugin.store.put("state", {**plugin.engine.state(), "updated_at": now.isoformat(), "hunger": 20, "energy": 80})
 
 
+@pytest.mark.parametrize("age,expected", [(0, 15), (110, 10), (130, 0)])
+async def test_autonomous_planning_after_reading(plugin, age, expected):
+    """读完书后继续规划，并按最近两小时统计阅读时长。"""
+    p = plugin
+    start = p.now().replace(hour=10, minute=0, second=0, microsecond=0)
+    set_time(p, start)
+    book = await upload(p)
+    plan = p.engine.create_plan(PlanInput(title="阅读银杏书", kind="study", book_id=book["id"],
+        start=start.isoformat(), end=(start + timedelta(minutes=15)).isoformat()), "", start)
+    answer(p)
+    await p.books.prepare(plan, start)
+    ended = start + timedelta(minutes=15)
+    p.engine.advance(ended)
+    p.books.complete(p.store.get("plan", plan["id"]), ended)
+    now = ended + timedelta(minutes=age)
+    set_time(p, now)
+    p.config.life.autonomous = True
+    p.config.life.schedule_enabled = False
+    p.ctx.llm.generate.return_value = {"success": True, "response": json.dumps({
+        "title": "整理桌面", "kind": "leisure", "minutes": 10, "location": "住处", "motivation": "读完书收拾一下"})}
+    await p.living.choose_activity(now)
+    assert p.engine.current(now)["title"] == "整理桌面"
+    assert f"过去两小时已读书 {expected} 分钟" in p.ctx.llm.generate.call_args.args[0]
+
+
 def result(plugin, activity, subject, summary, next_action="", next_date=None):
     plugin.ctx.llm.generate.return_value = {"success": True, "response": json.dumps({
         "activity": activity, "subject": subject, "summary": summary, "details": {"结果": summary},

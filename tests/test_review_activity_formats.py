@@ -7,6 +7,51 @@ from test_activity_connections import set_time
 from maiweave.interfaces.review import Assessment
 
 
+@pytest.mark.parametrize('hunger', [64, 65, 100])
+@pytest.mark.parametrize('energy', [20, 80])
+@pytest.mark.parametrize('night_sleep', [False, True])
+async def test_hunger_energy_and_night_schedule(plugin, hunger, energy, night_sleep):
+    """饥饿阈值影响清醒时的自主选择，夜间仍按作息入睡。"""
+    p = plugin
+    now = p.now().replace(hour=1, minute=0, second=0, microsecond=0)
+    set_time(p, now)
+    p.config.life.autonomous = True
+    p.config.life.schedule_enabled = night_sleep
+    p.config.life.sleep_hour = 1
+    p.config.life.wake_hour = 7
+    with p.store.db:
+        p.store.put('state', {**p.engine.state(), 'hunger': hunger, 'energy': energy})
+    kind = 'meal' if hunger >= 65 else 'leisure'
+    p.ctx.llm.generate.return_value = {'success': True, 'response': json.dumps({
+        'title': '吃点东西' if kind == 'meal' else '整理桌面', 'kind': kind,
+        'minutes': 20, 'location': '住处', 'motivation': '按当前状态安排'})}
+    await p.living.choose_activity(now)
+    expected = 'sleep' if night_sleep else 'rest' if hunger < 65 and energy <= 25 else kind
+    assert p.engine.current(now)['kind'] == expected
+    assert p.ctx.llm.generate.await_count == (0 if expected in {'sleep', 'rest'} else 1)
+
+
+@pytest.mark.parametrize('accept', [False, True])
+async def test_classified_conflict_confirmation_preserves_manual_relationship(plugin, accept):
+    """分类冲突经确认后写入资料，手动关系沿用用户选择。"""
+    p = plugin
+    profile = p.anniversaries.save_profile('小明', 'private', 'user')
+    p.ctx.llm.generate.return_value = {'success': True, 'response': json.dumps({
+        'conflicts': [{'type': '关系', 'text': '从普通关系改为好友'}],
+        'relationship': '朋友', 'level': 1, 'reason': '已有互动'})}
+    record = await p.reviews.submit('profile', {'profile_id': profile['id'], 'name': '小明',
+        'session_id': 'private', 'user_id': 'user', 'intimacy_mode': 'manual',
+        'relationship': '好友', 'intimacy': 3}, 'private')
+    assert record['status'] == '待确认'
+    assert record['conflicts'] == ['关系：从普通关系改为好友']
+    await p.reviews.decide(record['id'], accept)
+    saved = p.store.get('profile', profile['id'])
+    if accept:
+        assert saved['relationship'] == '好友' and saved['intimacy'] == 3
+    else:
+        assert saved == profile
+
+
 def test_assessment_preserves_classified_conflicts():
     row=Assessment.model_validate_json(json.dumps({'conflicts':[{'type':'生日','text':'日期不同'},'称呼不同'],'relationship':'朋友','level':3}))
     assert row.conflicts==['生日：日期不同','称呼不同']
