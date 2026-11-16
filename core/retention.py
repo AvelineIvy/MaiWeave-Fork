@@ -3,11 +3,13 @@
 from datetime import timedelta
 
 from .models import local_time
+from .image_retention import ImageRetention
 
 
 class Retention:
-    def __init__(self, store, config):
+    def __init__(self, store, config, data_dir):
         self.store, self.config = store, config
+        self.images = ImageRetention(store, config, data_dir)
 
     def time(self, value):
         return local_time(value, self.config.life.timezone)
@@ -153,6 +155,7 @@ class Retention:
                                 ("book_note", "阅读笔记"), ("dream", "梦境")):
             summary.append(dict(category=category, label=label, total=store.count(category), days=0,
                                 limit=0, protected=0, remove=0, policy="长期保留"))
+        summary.append(self.images.collect(now)[2])
         return delete, histories, summary
 
     def preview(self, now):
@@ -162,6 +165,7 @@ class Retention:
     def clean(self, now):
         delete, histories, summary = self.collect(now)
         store = self.store
+        self.images.clean(now)
         with store.db:
             for row in self.sharing_updates.values():
                 if row["notice_ids"] or row["experience_ids"]:

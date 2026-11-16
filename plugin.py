@@ -153,7 +153,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         self.anniversaries = Anniversaries(self.store)
         self.reviews = Reviews(self)
         self.engine = LifeEngine(self.store, self.config.life.timezone, self.now())
-        self.retention = Retention(self.store, self.config)
+        self.retention = Retention(self.store, self.config, self.ctx.paths.data_dir)
         self.spatial = Spatial(self.engine)
         self.world = World(self.engine, self.ctx, self.config)
         self.rhythm = Rhythm(self.engine, self.spatial, self.config)

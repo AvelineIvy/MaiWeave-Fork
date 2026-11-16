@@ -84,3 +84,18 @@ async def test_chat_moments_keep_stream_ownership_and_budget(plugin):
     p.ctx.llm.generate.return_value = {'success': True, 'response': json.dumps({'moments': [{'source_ids': ['chat-1', 'chat-2'], 'summary': '混合', 'public_summary': ''}]})}
     with pytest.raises(ValueError, match='同一聊天流'):
         await p.diary.chat_moments(now.date(), now, {'经历': []})
+
+
+async def test_generation_applies_image_limit_immediately(plugin, monkeypatch):
+    p = plugin
+    now, day = prepare(p)
+    service(p, monkeypatch)
+    p.config.retention.image_count = 1
+    await p.diary_publisher.prepare(day, now)
+    first = await p.diary.images.illustrate('diary', day, now, '窗边')
+    original = Path(p.ctx.paths.data_dir) / first['image_file']
+    await p.diary_publisher.illustrate(day, now, '茶杯')
+    assert not original.exists()
+    assert 'image_file' not in p.store.get('diary', day)
+    assert p.store.get('diary', day)['status'] == '已生成'
+    assert p.store.get('diary_publication', day)['image_file']

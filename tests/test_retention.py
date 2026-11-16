@@ -235,3 +235,53 @@ async def test_goal_history_and_expired_routine_exceptions(plugin):
     p.config.retention.history_count = 0
     p.retention.clean(now)
     assert len(p.store.get("goal", "goal")["outline_history"]) == 10
+
+
+async def test_image_cleanup_limits_files_and_keeps_text(plugin):
+    import os
+    from pathlib import Path
+    p = plugin
+    now = p.now()
+    folder = Path(p.ctx.paths.data_dir) / "diary_images"
+    folder.mkdir()
+    p.config.retention.image_count = 2
+    p.config.retention.image_max_mb = 1
+    for index in range(4):
+        path = folder / f"image-{index}.png"
+        path.write_bytes(b"x" * 400000)
+        at = now - timedelta(days=100 if index == 0 else 4-index)
+        os.utime(path, (at.timestamp(), at.timestamp()))
+        with p.store.db:
+            p.store.put("diary", {"id": str(index), "status": "已生成", "content": "日记正文",
+                                 "image_file": "diary_images/" + path.name, "image_status": "已生成"})
+    (folder / "orphan.png").write_bytes(b"unused")
+    preview = next(row for row in p.retention.preview(now)["rows"] if row["category"] == "diary_images")
+    assert preview["remove"] == 3
+    p.retention.clean(now)
+    assert {path.name for path in folder.iterdir()} == {"image-2.png", "image-3.png"}
+    assert p.store.get("diary", "0")["content"] == "日记正文"
+    assert "image_file" not in p.store.get("diary", "0")
+    assert "清理" in p.store.get("diary", "0")["image_status"]
+
+
+async def test_image_cleanup_waits_for_publication(plugin):
+    import os
+    from pathlib import Path
+    p = plugin
+    now = p.now()
+    folder = Path(p.ctx.paths.data_dir) / "diary_images"
+    folder.mkdir()
+    path = folder / "publishing.png"
+    path.write_bytes(b"image")
+    old = (now - timedelta(days=100)).timestamp()
+    os.utime(path, (old, old))
+    with p.store.db:
+        p.store.put("diary_publication", {"id": "old", "status": "发布中", "content": "空间正文",
+                                         "image_file": "diary_images/publishing.png"})
+    p.retention.clean(now)
+    assert path.exists()
+    with p.store.db:
+        p.store.put("diary_publication", {**p.store.get("diary_publication", "old"), "status": "已发布"})
+    p.retention.clean(now)
+    assert not path.exists()
+    assert p.store.get("diary_publication", "old")["status"] == "已发布"

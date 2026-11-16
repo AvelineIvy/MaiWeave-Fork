@@ -175,6 +175,9 @@ class RetentionConfig(PluginConfigBase):
 
     __ui_label__ = "数据保留"
     enabled: bool = setting("每日自动清理", default=True, description="每天清理一次；经历与记忆页面可预览数量和立即清理。")
+    image_days: int = setting("日记配图保留天数", default=90, ge=1, description="日记与空间配图共用，超期清理图片，正文和发布记录继续保留。")
+    image_count: int = setting("日记配图数量上限", default=200, ge=1, description="两类配图合计，超出后从最旧的图片开始清理。")
+    image_max_mb: int = setting("日记配图容量上限（MiB）", default=512, ge=1, description="配图原文件的总容量；每次生成后检查上限，每日清理同时处理过期图片和遗留文件。")
     log_days: int = setting("运行记录保留天数", default=7, ge=0, description="主动交流回执、已结束任务、资料核对、情绪变化及已结束跟进记录；0 表示按数量管理。")
     log_count: int = setting("每类运行记录上限", default=1000, ge=0, description="每类分别计数；0 表示按天数管理，两项均为 0 时长期保留。")
     usage_days: int = setting("模型调用明细保留天数", default=30, ge=0, description="Token 统计按保留的明细汇总；0 表示按数量管理。")

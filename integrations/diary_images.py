@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
 from .usage import generate
+from ..core.image_retention import ImageRetention
 
 
 class IllustratedText(BaseModel):
@@ -98,6 +99,8 @@ class DiaryImages:
                 prompt = idea.image_prompt
             row["image_prompt"] = prompt
             data, tokens = await asyncio.to_thread(self.request, prompt + "\n画面风格：" + config.image_style)
+            if len(data) > self.config.retention.image_max_mb * 1024 * 1024:
+                raise ValueError("生成的图片超过配图容量上限，请调整容量设置")
             if data.startswith(b"\x89PNG\r\n\x1a\n"):
                 mime, extension = "image/png", "png"
             elif data.startswith(b"\xff\xd8"):
@@ -126,7 +129,8 @@ class DiaryImages:
             self.put(category, row)
             usage["seconds"] = round(perf_counter() - started, 3)
             self.put("model_usage", usage)
-        return row
+        ImageRetention(self.store, self.config, self.ctx.paths.data_dir).clean(now)
+        return self.store.get(category, day)
 
     def remove(self, category, day):
         row = self.editable(category, day)
