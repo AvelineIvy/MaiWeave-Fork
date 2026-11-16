@@ -56,3 +56,29 @@ async def test_tabs_and_model_selection_preserve_config(plugin):
     assert "custom_reading" in fields["reading"]["choices"]
     assert "当前使用：custom_reading" in fields["reading"]["hint"]
     assert "当前使用：custom_default" in fields["diary"]["hint"]
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_interrupted_model_call_records_reason(plugin, cancelled):
+    import asyncio
+    error = asyncio.CancelledError() if cancelled else TimeoutError()
+    plugin.ctx.llm.generate.side_effect = error
+    with pytest.raises(type(error)):
+        await _once(plugin.ctx, plugin.store, plugin.config, "生活日记", "测试")
+    row = plugin.store.all("model_usage")[-1]
+    assert row["status"] == "失败"
+    assert row["error"] == ("模型请求已取消" if cancelled else "模型请求超时")
+
+
+async def test_image_configuration_and_model_schema_are_independent(plugin):
+    plugin.config.life.model_task = "planner"
+    plugin.config.models.diary = "replyer"
+    plugin.config.diary.image_model = "local-image"
+    first = plugin.get_webui_config_schema()
+    second = plugin.get_webui_config_schema()
+    assert first == second
+    assert first["sections"]["diary"]["fields"]["image_api_key"]["ui_type"] == "password"
+    assert "当前使用：replyer" in first["sections"]["model_expression"]["fields"]["diary"]["hint"]
+    await _once(plugin.ctx, plugin.store, plugin.config, "生活日记", "写日记")
+    assert plugin.ctx.llm.generate.call_args.kwargs["task_name"] == "replyer"
+    assert plugin.config.diary.image_model == "local-image"

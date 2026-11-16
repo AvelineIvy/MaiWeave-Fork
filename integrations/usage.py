@@ -30,8 +30,8 @@ async def _once(ctx, store, config, feature, prompt):
             for key in ("prompt_tokens", "completion_tokens", "total_tokens", "prompt_cache_hit_tokens"):
                 record[key] = None
         return result
-    except Exception as error:
-        record["error"] = str(error)
+    except (Exception, asyncio.CancelledError) as error:
+        record["error"] = str(error) or ("模型请求已取消" if isinstance(error, asyncio.CancelledError) else "模型请求超时" if isinstance(error, TimeoutError) else type(error).__name__)
         raise
     finally:
         record["seconds"] = round(perf_counter() - started, 3)

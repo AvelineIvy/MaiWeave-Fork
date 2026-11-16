@@ -118,6 +118,7 @@ async def test_wake_expiry_before_resume_is_visible(plugin, monkeypatch):
     status = await plugin.get_life_status()
     assert status["current"] is None and not status["sleeping"] and status["awake_until"] is None
     assert status["effective_sleeping"] and status["quiet"]
+    assert (await plugin.ui_overview())["sleep"] == "睡眠中"
     assert status["sleep_until"] == end.isoformat()
     for behavior in ["conversation", "proactive"]:
         result = await plugin.evaluate_behavior(behavior)

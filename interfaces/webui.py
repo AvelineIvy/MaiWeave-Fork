@@ -377,7 +377,7 @@ class WebUI:
                 "share_decisions": share_decisions,
                 "share_summary": share_summary,
                 "share_settings": share_settings,
-                "location": state["location"] or "未登记", "sleep": "睡眠中" if current and current["kind"] == "sleep" else "清醒",
+                "location": state["location"] or "未登记", "sleep": "睡眠中" if (current and current["kind"] == "sleep") or self.living.sleeping(now) else "清醒",
                 "schedule_mode": "按日常作息" if self.config.life.schedule_enabled else "全天候交流",
                 "awake_until": display_time(self.living.awake_until(now).isoformat()) if self.living.awake_until(now) and self.config.life.schedule_enabled else "当前没有陪伴时段",
                 "mood_label": "心情不错" if state["mood"] > 10 else ("有些低落" if state["mood"] < -10 else "平静"),

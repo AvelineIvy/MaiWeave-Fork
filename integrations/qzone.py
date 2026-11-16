@@ -1,7 +1,6 @@
 """把日记中的公开生活素材整理成随笔，通过 SnowLuma 发布到 QQ 空间。"""
 
 import asyncio
-import base64
 from pathlib import Path
 from .diary_images import DiaryImages, IllustratedText, IMAGE_INSTRUCTION
 from ..life.diary import writing_material
@@ -125,7 +124,7 @@ class DiaryPublisher:
         content = content.strip()
         if not content:
             raise ValueError("请填写空间文案")
-        if old and old.get("image_file") and old.get("image_content") != content:
+        if old and old.get("content") != content:
             old = self.remove_image(day)
         row = {**(old or {}), "id": day, "day": day, "content": content, "status": "草稿", "error": "",
                "updated_at": now.isoformat()}

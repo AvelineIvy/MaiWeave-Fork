@@ -210,3 +210,19 @@ async def test_diary_finished_after_midnight_is_published_once(plugin):
     await p.diary_publisher.process(finished + timedelta(minutes=1))
     assert p.store.get("diary_publication", day)["status"] == "已发布"
     assert p.ctx.call_capability.await_count == 3
+
+
+@pytest.mark.parametrize("image_status", ["生成失败", "配图已按保留设置清理"])
+async def test_changed_publication_clears_old_scene_without_image(plugin, image_status):
+    p = plugin
+    now, day = prepare(p)
+    await p.diary_publisher.prepare(day, now)
+    row = p.store.get("diary_publication", day)
+    row.update(image_prompt="旧正文中的书桌", image_status=image_status, image_error="之前的错误")
+    p.diary_publisher.put(row)
+    p.diary_publisher.save(day, row["content"], now)
+    assert p.store.get("diary_publication", day)["image_prompt"] == "旧正文中的书桌"
+    p.diary_publisher.save(day, "今天去了海边散步。", now)
+    saved = p.store.get("diary_publication", day)
+    assert not any(key.startswith("image_") for key in saved)
+    assert saved["content"] == "今天去了海边散步。"
