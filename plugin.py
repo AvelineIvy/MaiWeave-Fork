@@ -79,7 +79,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
             ("quota", "proactive", "每日发送额度", "每日额度是最多发送次数，分享内容来自生活经历和待跟进事项。", ["daily_limit"]),
         ]
         groups += [
-            ('image_service', 'diary', '生图服务', '日记、空间与聊天共用此接口。', ['image_service_enabled', 'image_base_url', 'image_api_key', 'image_model', 'image_style']),
+            ('image_service', 'diary', '生图服务', '空间随笔与聊天共用此接口。', ['image_service_enabled', 'image_base_url', 'image_api_key', 'image_model', 'image_style']),
             ('image_use', 'diary', '图片用途', '按用途开启，聊天展示采用自然生活照片风格。', ['chat_images_enabled', 'image_enabled']),
             ('diary', 'diary', '生活日记', '安排写日记，整理空间随笔。', ['enabled', 'publish_mode', 'publish_visibility']),
             ('model_default', 'life', '默认生活模型', '各功能选择跟随默认时使用此任务。', ['model_task']),

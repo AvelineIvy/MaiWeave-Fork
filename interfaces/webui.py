@@ -191,23 +191,20 @@ class WebUI:
                               "material_text": "", "publication_status": (self.store.find("diary_publication", row["id"]) or {}).get("status", "尚未生成文案")} for row in rows]}, page, ['entries'])
 
     @API("ui_diary_publication", description="读取日记空间文案和发布状态")
-    async def ui_diary_publication(self, day: str, scope: str = "publication") -> dict:
-        if scope == "diary":
-            row = self.store.get("diary", day)
-            return {"record": {k: v for k, v in row.items() if k != "material"}, "image": await asyncio.to_thread(self.diary.images.preview, row), "image_service_enabled": self.config.diary.image_service_enabled}
+    async def ui_diary_publication(self, day: str) -> dict:
         return await self.diary_publisher.view(day)
 
     @API("ui_diary_publish_action", description="生成、编辑和发布日记空间文案")
-    async def ui_diary_publish_action(self, action: str, day: str = "", content: str = "", image_prompt: str = "", scope: str = "publication") -> dict:
+    async def ui_diary_publish_action(self, action: str, day: str = "", content: str = "", image_prompt: str = "") -> dict:
         if action in {"confirm_published", "confirm_unpublished"}:
             return self.diary_publisher.reconcile(day, action == "confirm_published", self.now())
         if action == "check":
             return self.start_job("检查空间连接", self.diary_publisher.check_connection())
         if action in {"image", "remove_image"}:
-            category = "diary" if scope == "diary" else "diary_publication"
+            category = "diary_publication"
             if action == "remove_image":
                 return self.diary.images.remove(category, day)
-            return self.start_job("生成日记配图", self.diary.images.illustrate(category, day, self.now(), image_prompt))
+            return self.start_job("生成空间随笔配图", self.diary.images.illustrate(category, day, self.now(), image_prompt))
         if action == "generate":
             return self.start_job("生成空间文案", self.diary_publisher.prepare(day, self.now()))
         if action == "save":

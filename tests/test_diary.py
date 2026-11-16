@@ -69,3 +69,23 @@ async def test_missed_diary_window_is_written_after_restart(plugin):
     assert diary["plan_id"] == plan["id"]
     await plugin.diary.process(later + timedelta(minutes=1))
     assert plugin.ctx.llm.generate.await_count == 1
+
+
+async def test_diary_stays_text_when_space_images_enabled(plugin, tmp_path):
+    from unittest.mock import AsyncMock
+    now = plugin.now()
+    history(plugin, now - timedelta(minutes=1))
+    plugin.config.diary.image_service_enabled = True
+    plugin.config.diary.image_enabled = True
+    old_file = tmp_path / "old-diary.png"
+    old_file.write_bytes(b"old")
+    with plugin.store.db:
+        plugin.store.put("diary", {"id": now.date().isoformat(), "status": "已生成", "content": "旧日记", "image_file": str(old_file)})
+    plugin.diary.images.illustrate = AsyncMock()
+    plugin.ctx.llm.generate.side_effect = None
+    plugin.ctx.llm.generate.return_value = {"success": True, "response": "今天过得很平静。"}
+    row = await plugin.diary.write("", now)
+    assert row["content"] == "今天过得很平静。"
+    plugin.diary.images.illustrate.assert_not_awaited()
+    assert old_file.exists()
+    assert row["image_file"] == str(old_file)

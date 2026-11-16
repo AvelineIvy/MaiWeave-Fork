@@ -127,7 +127,7 @@ class DiaryConfig(PluginConfigBase):
     publish_mode: Literal["关闭", "手动发布", "日记完成后自动发布"] = setting("日记发空间", default="关闭", description="通过已连接的 SnowLuma 发布生活随笔和可选配图。自动模式在写日记日程结束后发布当天日记，每天一篇。")
     image_service_enabled: bool = setting("启用生图服务", default=False, description="控制新图片生成；已有图片仍可查看。关闭后文字日记、空间文案与聊天照常运行。")
     chat_images_enabled: bool = setting("聊天中展示生活图片", default=False, description="允许追问时发图，以及主动分享时由模型选择配图；同一经历复用已保存图片。")
-    image_enabled: bool = setting("自动配图", default=False, description="日记和空间文案写好后，各生成一张生活插画；关闭时可在详情中手动生成。")
+    image_enabled: bool = setting("空间随笔自动配图", default=False, description="开启生图服务后，为新写好的空间随笔生成一张配图；关闭此项可在详情中手动生成。聊天配图由「聊天中展示生活图片」控制。")
     image_base_url: str = setting("生图接口地址（生图必填）", default="https://api.openai.com/v1", description="填写支持 OpenAI 图片生成接口的服务地址，包含 /v1；插件调用 /images/generations。")
     image_api_key: str = setting("生图 API Key（生图必填）", default="", description="填写生图服务提供的密钥。", json_schema_extra={"x-widget": "password", "input_type": "password"})
     image_model: str = setting("生图模型（生图必填）", default="gpt-image-1", description="填写服务实际支持的图片生成模型名称。每次生成一张横向 4:3、1024×768 图片。")
@@ -177,7 +177,7 @@ class RetentionConfig(PluginConfigBase):
 
     __ui_label__ = "数据保留"
     enabled: bool = setting("每日自动清理", default=True, description="每天清理一次；经历与记忆页面可预览数量和立即清理。")
-    image_days: int = setting("生活图片保留天数", default=90, ge=1, description="日记、空间与聊天图片共用，超期清理图片，正文和发布记录继续保留。")
+    image_days: int = setting("生活图片保留天数", default=90, ge=1, description="空间随笔、聊天图片和已有日记图片共用，超期清理图片，正文和发布记录继续保留。")
     image_count: int = setting("生活图片数量上限", default=500, ge=1, description="三类图片合计，超出后从最旧的图片开始清理。")
     image_max_mb: int = setting("生活图片容量上限（MiB）", default=1024, ge=1, description="配图原文件的总容量；每次生成后检查上限，每日清理同时处理过期图片和遗留文件。")
     log_days: int = setting("运行记录保留天数", default=7, ge=0, description="主动交流回执、已结束任务、资料核对、情绪变化及已结束跟进记录；0 表示按数量管理。")

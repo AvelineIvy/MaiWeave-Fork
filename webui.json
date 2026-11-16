@@ -1514,9 +1514,6 @@
             "day": {
               "type": "string",
               "required": true
-            },
-            "scope": {
-              "type": "string"
             }
           }
         }
@@ -1556,9 +1553,6 @@
               "type": "string"
             },
             "image_prompt": {
-              "type": "string"
-            },
-            "scope": {
               "type": "string"
             }
           }

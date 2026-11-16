@@ -230,20 +230,11 @@ async function showDetail(declaration,row){
   }
  }
  await render(declaration.children,dialog);
- if(row.detail_kind==='diary'){await renderPrivateDiaryImage(dialog,row);await renderDiaryPublication(dialog,row)}
+ if(row.detail_kind==='diary'){await renderDiaryPublication(dialog,row)}
 }
 function confirmPublication(message){
  return new Promise(resolve=>{const box=document.createElement('dialog'),text=document.createElement('p'),actions=document.createElement('div');text.textContent=message;actions.className='actions';box.append(text,actions);document.body.append(box);const finish=value=>{box.remove();resolve(value)};for(const [label,value] of [['取消',false],['确认',true]]){const button=document.createElement('button');button.className='maibot-button';button.textContent=label;button.onclick=()=>finish(value);actions.append(button)}box.oncancel=event=>{event.preventDefault();finish(false)};box.showModal()});
 }
-async function renderPrivateDiaryImage(dialog,row){
- const section=document.createElement('section'),title=document.createElement('h3'),label=document.createElement('label'),prompt=document.createElement('textarea'),preview=document.createElement('img'),status=document.createElement('p'),actions=document.createElement('div');
- title.textContent='日记配图';label.textContent='画面描述（可修改，选填）';prompt.className='maibot-input';prompt.rows=3;prompt.maxLength=1200;label.append(prompt);preview.alt='这篇日记的配图';preview.style.cssText='display:block;max-width:100%;max-height:360px;object-fit:contain;margin:16px auto;border-radius:10px';actions.className='actions';section.append(title,label,preview,status,actions);dialog.append(section);
- let state;const buttons=[];
- async function load(){state=await maibot.query('diary_publication',{day:row.id,scope:'diary'});prompt.value=state.record.image_prompt||'';preview.hidden=!state.image;if(state.image)preview.src=state.image;else preview.removeAttribute('src');status.textContent=state.record.image_error||state.record.image_status||(state.image_service_enabled===false?'生图服务已关闭，可在模型设置开启。':'选一个今天想留住的画面。');const busy=state.record.image_status==='生成中'||state.record.status==='生成中';for(const b of buttons)b.disabled=busy||state.record.status!=='已生成';buttons[0].disabled=buttons[0].disabled||state.image_service_enabled===false;buttons[1].disabled=busy||!state.image;prompt.disabled=busy}
- for(const [action,text] of [['image','生成 / 更换配图'],['remove_image','移除配图']]){const button=document.createElement('button');button.className='maibot-button';button.textContent=text;buttons.push(button);actions.append(button);button.onclick=()=>run(async()=>{for(const b of buttons)b.disabled=true;try{await tracked(button,text,async show=>waitOperation(await maibot.action('diary_publish_action',{action,day:row.id,scope:'diary',image_prompt:prompt.value}),show))}finally{await load()}})}
- await load();
-}
-
 async function renderDiaryPublication(dialog,row){
  const section=document.createElement('section'),heading=document.createElement('h3'),status=document.createElement('p'),connection=document.createElement('p'),hint=document.createElement('p'),label=document.createElement('label'),text=document.createElement('textarea'),actions=document.createElement('div');
  heading.textContent='日记发空间';label.textContent='空间文案（可编辑）';text.className='maibot-input';text.rows=7;label.append(text);actions.className='actions';section.append(heading,status,connection,hint,label,actions);dialog.append(section);
