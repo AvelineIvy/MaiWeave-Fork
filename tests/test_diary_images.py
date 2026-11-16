@@ -200,7 +200,7 @@ async def test_image_style_follows_use(plugin, monkeypatch, category, expected):
     monkeypatch.setattr(type(images), 'request', request)
     images.put(category, {"id": "style-test", "status": "草稿", "content": "窗边茶杯"})
     await images.illustrate(category, "style-test", p.now(), "窗边茶杯")
-    assert prompts == ["窗边茶杯\n画面风格：" + expected]
+    assert prompts == ["窗边茶杯\n画面风格：" + expected + "\n负面提示词（画面中避免）：" + p.config.diary.image_negative_prompt]
 
 
 @pytest.mark.parametrize("category", ["experience_image", "diary_publication"])

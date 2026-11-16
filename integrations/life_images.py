@@ -26,11 +26,11 @@ class LifeImages:
         return [{"id": row["id"], "summary": row["summary"][:200], "occurred_at": row["occurred_at"],
                  "has_image": self.reusable(row, self.store.find("experience_image", row["id"]) or {})} for row in rows]
 
-    async def requested(self, experience_id, session, now):
+    async def requested(self, experience_id, session, now, *, framing=""):
         """追问图片的后台任务失败时，在原聊天告知结果。"""
         self.engine.owned("experience", experience_id, session)
         try:
-            return await self.send(experience_id, session, now)
+            return await self.send(experience_id, session, now, framing=framing)
         except Exception:
             result = await self.ctx.send.text("这次图片没发出来，可以稍后再让我试试。", session,
                 return_details=True, storage_message=True, sync_to_maisaka_history=True)
@@ -38,7 +38,7 @@ class LifeImages:
                 self.ctx.logger.error("生活图片失败提示发送失败：%s", result.get("error"))
             raise
 
-    async def send(self, experience_id, session, now, *, share_id=""):
+    async def send(self, experience_id, session, now, *, share_id="", framing=""):
         if not self.config.diary.chat_images_enabled:
             raise ValueError("聊天图片已关闭，可在模型设置的图片用途中开启")
         event = self.engine.owned("experience", experience_id, session)
@@ -53,6 +53,11 @@ class LifeImages:
                      "content": content}
             self.images.put("experience_image", image)
         if not image.get("image_file"):
+            if framing:
+                image["image_request"] = framing[:300]
+                image.pop("image_prompt", None)
+                image.pop("image_character_visible", None)
+                self.images.put("experience_image", image)
             image = await self.images.illustrate("experience_image", experience_id, now)
         delivery = {"id": uuid4().hex, "at": now.isoformat(), "session_id": session,
                     "experience_id": experience_id, "share_id": share_id, "status": "发送中",

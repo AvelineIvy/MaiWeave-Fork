@@ -62,14 +62,20 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
     model_tasks = ["utils"]
 
     config_widgets = [
+        ConfigWidget(id="image_settings_guide", kind="status", label="模型设置 · 图片与角色卡"),
         ConfigWidget(id="test_image", kind="action", label="测试生图配置"),
+        ConfigWidget(id="generate_character", kind="action", label="根据 MaiBot 人设生成角色卡"),
         ConfigWidget(id="image_test_result", kind="status", label="生图测试结果"),
+        ConfigWidget(id="character_draft", kind="status", label="角色卡草稿"),
     ]
 
     _image_test_feedback_until = 0.0
     _image_test_started = 0.0
     _image_test_seconds = 0.0
     _image_test_date = ""
+    _character_draft_running = False
+    _character_draft_text = ""
+    _character_draft_tone = "neutral"
 
     async def get_config_widget_state(self):
         running = self._image_test_feedback_until == float("inf")
@@ -87,13 +93,18 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         if visible:
             text += f" · 测试时间 {self._image_test_date}"
         return {
+            "image_settings_guide": ConfigWidgetState(text="配置位置：模型设置 → 图片生成服务 / 麦麦角色卡。\n测试生图：先保存接口和模型配置，再点击测试。\n生成角色卡：读取 MaiBot 人设生成外貌与穿着草稿，复制到角色卡配置后保存。"),
             "test_image": ConfigWidgetState(disabled=not self.config.diary.image_service_enabled or running),
             "image_test_result": ConfigWidgetState(text=text[:2000], tone=tone, visible=visible),
+            "generate_character": ConfigWidgetState(disabled=self._character_draft_running),
+            "character_draft": ConfigWidgetState(text=self._character_draft_text, tone=self._character_draft_tone, visible=bool(self._character_draft_text)),
         }
 
     async def on_config_widget_action(self, action_id):
         if action_id == "test_image":
             await self.ui_test_image()
+        elif action_id == "generate_character":
+            await self.ui_generate_character()
 
 
     @classmethod
@@ -115,7 +126,8 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
             ("quota", "proactive", "每日发送额度", "每日额度是最多发送次数，分享内容来自生活经历和待跟进事项。", ["daily_limit"]),
         ]
         groups += [
-            ('image_service', 'diary', '图片生成服务', '空间随笔与聊天共用此接口。', ['image_service_enabled', 'image_base_url', 'image_api_key', 'image_model', 'image_style', 'chat_image_style']),
+            ('image_service', 'diary', '图片生成服务', '空间随笔与聊天共用此接口。', ['image_service_enabled', 'image_base_url', 'image_api_key', 'image_model', 'image_style', 'chat_image_style', 'image_negative_prompt']),
+            ('image_character', 'diary', '麦麦角色卡', '空间和聊天共用；人物画面使用角色设定，物件特写以物件为主。', ['image_character_enabled', 'image_character_appearance', 'image_character_clothing', 'image_character_reference_enabled', 'image_character_reference_url']),
             ('image_use', 'diary', '图片用途', '分别设置聊天图片和空间随笔自动配图。', ['chat_images_enabled', 'image_enabled']),
             ('diary', 'diary', '生活日记', '安排写日记，整理空间随笔。', ['enabled', 'publish_mode', 'publish_visibility']),
             ('model_default', 'life', '默认生活模型', '各功能选择跟随默认时使用此任务。', ['model_task']),
@@ -165,7 +177,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         ]}
         advanced = ["planning", "world_updates", "rhythm_details", "dream_details", "followup_details", "retry_details", "reading_details", "books", "context_limits", "book_context", "retention", "plugin"]
         schema["layout"]["tabs"].extend([
-            {"id": "models", "title": "模型设置", "sections": ["model_default", "model_arrangement", "model_expression", "model_information", "image_service", "image_use"], "order": 5},
+            {"id": "models", "title": "模型设置", "sections": ["model_default", "model_arrangement", "model_expression", "model_information", "image_service", "image_character", "image_use"], "order": 5},
             {"id": "advanced", "title": "高级设置", "sections": advanced, "order": 6},
         ])
         for key in advanced:

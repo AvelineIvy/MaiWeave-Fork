@@ -3,7 +3,7 @@
 import asyncio
 from pathlib import Path
 from .qzone_web import QzoneWeb
-from .diary_images import DiaryImages, IllustratedText, IMAGE_INSTRUCTION
+from .diary_images import DiaryImages, IllustratedText
 from ..life.diary import writing_material
 from .chat_context import dump, brief
 import json
@@ -90,18 +90,23 @@ class DiaryPublisher:
                       f"日期：{day}；角色：{dump(brief(personality, 1500, 6))}；"
                       f"素材：{dump(public)}")
             if self.config.diary.image_service_enabled and self.config.diary.image_enabled:
-                result = await generate(self.ctx, self.store, self.config, "空间文案", prompt.replace("直接返回正文。", "") + IMAGE_INSTRUCTION, IllustratedText)
+                result = await generate(self.ctx, self.store, self.config, "空间文案", prompt.replace("直接返回正文。", "") + self.images.instruction(), IllustratedText)
                 row.update(content=result.content.strip(), image_prompt=result.image_prompt, status="草稿")
+                if self.config.diary.image_character_enabled:
+                    row["image_character_visible"] = result.character_visible
+                else:
+                    row.pop("image_character_visible", None)
             else:
                 result = await generate(self.ctx, self.store, self.config, "空间文案", prompt)
                 row.update(content=result["response"].strip(), status="草稿")
             if old and old.get("image_file"):
                 (Path(self.ctx.paths.data_dir) / old["image_file"]).unlink()
             for key in list(row):
-                if key.startswith("image_") and key != "image_prompt":
+                if key.startswith("image_") and key not in {"image_prompt", "image_character_visible"}:
                     row.pop(key)
             if not (self.config.diary.image_service_enabled and self.config.diary.image_enabled):
                 row.pop("image_prompt", None)
+                row.pop("image_character_visible", None)
         except asyncio.CancelledError:
             row.update(status="生成失败", error="文案生成已中断，可以重新生成")
             raise

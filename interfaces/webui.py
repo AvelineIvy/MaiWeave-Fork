@@ -46,6 +46,27 @@ def plan_row(plan):
 
 
 class WebUI:
+    @API("ui_generate_character", description="根据 MaiBot 人设生成角色卡草稿")
+    async def ui_generate_character(self) -> dict:
+        if self._character_draft_running:
+            raise ValueError("角色卡正在生成，请等待结果")
+        self._character_draft_running = True
+        self._character_draft_text = "正在读取 MaiBot 人设并生成角色卡…"
+        self._character_draft_tone = "neutral"
+        async def run():
+            try:
+                draft = await self.diary_publisher.images.character_draft()
+                self._character_draft_text = ("角色卡草稿已生成，可复制到下方「麦麦角色卡」中修改、保存。\n"
+                    + "外貌设定：" + draft.appearance + "\n常用穿着：" + draft.clothing)
+                self._character_draft_tone = "success"
+            except Exception as error:
+                self._character_draft_text = "角色卡生成失败：" + str(error)[:1500]
+                self._character_draft_tone = "error"
+                raise
+            finally:
+                self._character_draft_running = False
+        return self.start_job("生成角色卡草稿", run())
+
     @API("ui_image_test", description="读取生图配置测试结果")
     async def ui_image_test(self) -> dict:
         row = self.store.find("image_test", "latest") or {}
