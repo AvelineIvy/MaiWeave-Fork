@@ -3,6 +3,7 @@
 import asyncio
 import json
 import math
+from time import monotonic
 from datetime import date, timedelta
 
 from maibot_sdk import API
@@ -45,6 +46,34 @@ def plan_row(plan):
 
 
 class WebUI:
+    @API("ui_image_test", description="读取生图配置测试结果")
+    async def ui_image_test(self) -> dict:
+        row = self.store.find("image_test", "latest") or {}
+        usages = [item for item in self.store.all("model_usage") if item["feature"] == "生图测试"]
+        last = usages[-1] if usages else {}
+        return {"enabled": self.config.diary.image_service_enabled,
+                "model": self.config.diary.image_model, "tested_model": row.get("tested_model", ""), "tested_at": row.get("tested_at", ""), "status": row.get("image_status", "尚未测试"),
+                "error": row.get("image_error", ""), "seconds": last.get("seconds")}
+
+    @API("ui_test_image", description="使用已保存的生图配置生成测试图片")
+    async def ui_test_image(self) -> dict:
+        images = self.diary_publisher.images
+        old = self.store.find("image_test", "latest") or {}
+        if old.get("image_status") == "生成中":
+            raise ValueError("生图测试正在进行，请等待结果")
+        if not self.config.diary.image_service_enabled:
+            raise ValueError("请先保存生图配置并开启生图服务")
+        row = {**old, "id": "latest", "status": "草稿", "content": "窗边木桌上的一杯热茶与一盆小绿植",
+               "tested_model": self.config.diary.image_model, "tested_at": self.now().isoformat()}
+        images.put("image_test", row)
+        async def run():
+            try:
+                await images.illustrate("image_test", "latest", self.now(), row["content"])
+            finally:
+                self._image_test_feedback_until = monotonic() + 30
+        self._image_test_feedback_until = float("inf")
+        return self.start_job("测试生图配置", run())
+
     @API("ui_life_images", description="查看生活图片和发送记录")
     async def ui_life_images(self) -> dict:
         rows = self.store.all("experience_image")[-4:]

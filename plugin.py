@@ -10,8 +10,9 @@ from pathlib import Path
 from urllib.error import URLError
 from uuid import uuid4
 from zoneinfo import ZoneInfo
+from time import monotonic
 
-from maibot_sdk import API, HomeCard, HookHandler, MaiBotPlugin, Tool
+from maibot_sdk import API, HomeCard, HookHandler, MaiBotPlugin, Tool, ConfigWidget, ConfigWidgetState
 
 from .config import MaiWeaveConfig
 from .core.engine import LifeEngine, read_life_status
@@ -59,6 +60,33 @@ def operation(function):
 class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
     config_model = MaiWeaveConfig
     model_tasks = ["utils"]
+
+    config_widgets = [
+        ConfigWidget(id="test_image", kind="action", label="测试生图配置"),
+        ConfigWidget(id="image_test_result", kind="status", label="生图测试结果"),
+    ]
+
+    _image_test_feedback_until = 0.0
+
+    async def get_config_widget_state(self):
+        running = self._image_test_feedback_until == float("inf")
+        visible = monotonic() < self._image_test_feedback_until
+        text, tone = "正在测试生图配置…", "neutral"
+        if visible and not running:
+            result = await self.ui_image_test()
+            text = "测试失败：" + result["error"] if result["error"] else "测试完成：" + result["status"]
+            if result["seconds"] is not None:
+                text += f" · {result['seconds']} 秒"
+            tone = "error" if result["error"] else "success"
+        return {
+            "test_image": ConfigWidgetState(disabled=not self.config.diary.image_service_enabled or running),
+            "image_test_result": ConfigWidgetState(text=text[:2000], tone=tone, visible=visible),
+        }
+
+    async def on_config_widget_action(self, action_id):
+        if action_id == "test_image":
+            await self.ui_test_image()
+
 
     @classmethod
     def build_config_schema(cls, **kwargs):

@@ -10,7 +10,7 @@ class ImageRetention:
 
     def collect(self, now):
         cfg = self.config.retention
-        records = [(category, row) for category in ("diary", "diary_publication", "experience_image")
+        records = [(category, row) for category in ("diary", "diary_publication", "experience_image", "image_test")
                    for row in self.store.all(category)]
         refs = {Path(row["image_file"]).name: (category, row) for category, row in records if row.get("image_file")}
         busy = {name for name, (_, row) in refs.items()

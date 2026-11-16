@@ -30,7 +30,7 @@ class DiaryImages:
     def __init__(self, engine, context, config):
         self.store, self.ctx, self.config = engine.store, context, config
         with self.store.db:
-            for category in ("diary", "diary_publication", "experience_image"):
+            for category in ("diary", "diary_publication", "experience_image", "image_test"):
                 for row in self.store.all(category):
                     if row.get("image_status") == "生成中":
                         row.update(image_status="生成失败", image_error="配图已中断，可以重新生成")
@@ -91,7 +91,7 @@ class DiaryImages:
         self.put(category, row)
         started = perf_counter()
         usage = {"id": uuid4().hex, "at": datetime.now(ZoneInfo(self.config.life.timezone)).isoformat(),
-                 "feature": "生活图片" if category == "experience_image" else "空间配图", "task": "images/generations", "model": config.image_model,
+                 "feature": {"experience_image": "生活图片", "image_test": "生图测试"}.get(category, "空间配图"), "task": "images/generations", "model": config.image_model,
                  "status": "失败", "error": "", "prompt_tokens": None, "completion_tokens": None,
                  "total_tokens": None, "prompt_cache_hit_tokens": None}
         try:

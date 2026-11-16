@@ -130,3 +130,49 @@ async def test_webui_space_image_actions_leave_diary_untouched(plugin, monkeypat
     assert not (await p.ui_diary_publication(day))['image']
     assert p.store.get('diary', day) == private
     assert (Path(p.ctx.paths.data_dir) / private['image_file']).exists()
+
+
+async def test_image_config_test_replaces_preview_and_reports_failure(plugin, monkeypatch):
+    import asyncio
+    p = plugin
+    service(p, monkeypatch)
+    for _ in range(2):
+        job = await p.ui_test_image()
+        await asyncio.gather(*list(p.jobs))
+        assert p.store.get('job', job['task_id'])['status'] == '已完成'
+    result = await p.ui_image_test()
+    assert result['status'] == '已生成'
+    assert result['seconds'] is not None
+    assert len(list((Path(p.ctx.paths.data_dir) / 'diary_images').iterdir())) == 1
+    assert not p.store.all('diary_publication') and not p.store.all('experience_image')
+    p.ctx.send.image.assert_not_awaited()
+    def fail(self, prompt):
+        raise RuntimeError('生图服务返回 HTTP 401')
+    monkeypatch.setattr(type(p.diary_publisher.images), 'request', fail)
+    await p.ui_test_image()
+    await asyncio.gather(*list(p.jobs))
+    result = await p.ui_image_test()
+    assert result['status'] == '生成失败' and '401' in result['error']
+    assert all(row['feature'] == '生图测试' for row in p.store.all('model_usage'))
+    p.retention.images.clean(p.now() + timedelta(days=91))
+    assert not p.store.get('image_test', 'latest').get('image_file')
+
+
+async def test_config_widget_uses_image_test_job(plugin, monkeypatch):
+    import asyncio
+    from maibot_sdk.config_widgets import ConfigWidgetSnapshot
+    p = plugin
+    states = await p.get_config_widget_state()
+    assert states['test_image'].disabled
+    assert not states['image_test_result'].visible
+    service(p, monkeypatch)
+    await p.on_config_widget_action('test_image')
+    await asyncio.gather(*list(p.jobs))
+    states = await p.get_config_widget_state()
+    ConfigWidgetSnapshot(widgets=p.config_widgets, states=states)
+    assert not states['test_image'].disabled
+    assert states['image_test_result'].tone == 'success'
+    assert '已生成' in states['image_test_result'].text
+    assert states['image_test_result'].visible
+    p._image_test_feedback_until = 0
+    assert not (await p.get_config_widget_state())['image_test_result'].visible
