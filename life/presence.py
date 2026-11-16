@@ -1,10 +1,7 @@
 """按 MaiBot 人物身份保存近期陈述与后续活动。"""
 
 import re
-import json
-
-from ..core.models import ShareDecision
-from ..integrations.usage import generate
+from uuid import uuid4
 from datetime import timedelta
 
 
@@ -13,6 +10,7 @@ class Presence:
         self.living = living
         self.engine = living.engine
         self.store = self.engine.store
+        self.offered = {}
 
     def declare(self, session, user, status, now, until=""):
         person = self.living.person_key(session, user)
@@ -37,7 +35,7 @@ class Presence:
             return
         # 明确的当前陈述即时记录，其余表达由 Planner 结合上下文调用工具。
         statements = {
-            "准备睡觉": r"(?:我)?(?:先|准备|要)?(?:去睡了|睡觉了|去睡觉了)(?:啊|呀|啦|哦|哈)?",
+            "准备睡觉": r"(?:@\S+\s+)?(?:我)?(?:先|准备|要)?(?:去睡了|睡觉了|去睡觉了)(?:啊|呀|啦|哦|哈)?(?:[，,。！!\s]+晚安)?",
             "忙碌": r"(?:我)?(?:先|要)?(?:去忙了|忙去了|去工作了|去开会了)",
             "外出": r"(?:我)?(?:先|要)?(?:出门了|出去了)",
             "空闲": r"(?:我)?(?:刚|已经)?(?:忙完了|回来了|起床了|睡醒了|下班了)",
@@ -67,6 +65,8 @@ class Presence:
             if (self.engine.time(record["expires_at"]) <= now or not activity
                     or now - self.engine.time(activity["at"]) >= timedelta(minutes=30)):
                 continue
+            if record["status"] == "准备睡觉" and record.get("elsewhere"):
+                continue
             later = self.engine.time(activity["at"]) > self.engine.time(record["said_at"])
             result.append({"user_id": activity["user_id"], "person_id": record["id"],
                            "statement": record["status"], "said_at": record["said_at"], "source": "reported",
@@ -86,70 +86,106 @@ class Presence:
                 for r in self.store.all("person_state") if r["id"] in people and self.engine.time(r["expires_at"]) > now]
 
     async def observe_group(self, message, now):
-        """将同一人在群里的发言关联到尚未回复的主动私聊。"""
+        """把群里遇见同一人的机会留给当前群聊。"""
+        receipts = self.living.receipts
+        if any(r.get("mode") == "群聊接话" and r["outcome"] == "MaiBot 已受理" for r in self.store.all("share_receipt")):
+            await receipts.refresh(now)
         info = message.get("message_info", {})
         text = (message.get("processed_plain_text") or "").strip()
-        if not info.get("group_info") or not text or text.startswith("/"):
-            return
-        if not self.living.config.proactive.enabled:
+        if not info.get("group_info") or not text or text.startswith("/") or not self.living.config.proactive.enabled:
             return
         user = str(info.get("user_info", {}).get("user_id", ""))
+        person = self.living.person_key(message["session_id"], user)
+        activity = {"session_id": message["session_id"], "user_id": user, "person_id": person,
+                    "at": now.isoformat(), "status": "pending"}
+        state = self.store.find("person_state", person) if person else None
+        if (state and state["status"] == "准备睡觉" and not state.get("elsewhere")
+                and self.engine.time(state["said_at"]) < now < self.engine.time(state["expires_at"])):
+            state["elsewhere"] = {**activity, "kind": "sleep", "public": state["session_id"] == message["session_id"]}
+            with self.store.db:
+                self.store.put("person_state", state)
         streams = await self.living.ctx.chat.get_all_streams(platform="all_platforms")
         for stream in streams:
             if (stream.get("group_id") or stream.get("is_group_session")
                     or str(stream.get("user_id", "")) != user or stream.get("platform") != message.get("platform")
                     or (stream.get("account_id") and message.get("account_id") and stream["account_id"] != message["account_id"])):
                 continue
-            recent = self.living.receipts.context(stream["stream_id"], now)
+            recent = receipts.context(stream["stream_id"], now)
             if not recent:
                 continue
             row = self.store.get("share_receipt", recent[0]["id"])
-            if (row.get("outcome") != "实际已发送" or row.get("followup", "waiting") != "waiting" or row.get("observed_at")
-                    or row.get("elsewhere") or row.get("record_id", "").startswith("elsewhere:")):
+            if (row.get("outcome") != "实际已发送" or row.get("followup", "waiting") != "waiting"
+                    or row.get("observed_at") or row.get("elsewhere") or row.get("record_id", "").startswith("elsewhere:")):
                 continue
-            row["elsewhere"] = {"session_id": message["session_id"], "user_id": user,
-                                "at": now.isoformat(), "text": text[:300], "status": "pending"}
+            row["elsewhere"] = {**activity, "kind": "unanswered", "public": False}
             with self.store.db:
                 self.store.put("share_receipt", row)
 
-    async def followup(self, session, now):
-        """沿用主动交流时机，在原私聊决定是否轻轻打趣一次。"""
-        recent = self.living.receipts.context(session, now)
-        if not recent:
-            return None
-        row = self.store.get("share_receipt", recent[0]["id"])
-        activity = row.get("elsewhere", {})
-        if (activity.get("status") != "pending" or row.get("observed_at")
-                or row.get("followup", "waiting") != "waiting"
-                or not timedelta() <= now - self.engine.time(activity["at"]) < timedelta(minutes=30)):
-            return None
-        recipient = await self.living.share_recipient(session, "")
-        history = await self.living.receipts.recent_chat(session)
-        group_history = await self.living.receipts.recent_chat(activity["session_id"])
-        guide = ("你主动私聊后，对方还没有在私聊回复，随后在共同群聊里说了话。判断现在是否适合回原私聊轻轻打趣一次。"
-                 "输出 JSON：send（是否开口）、reason（原因）。普通关系更倾向等待，亲近关系可以表达一点想念和轻松的小情绪。"
-                 "群里发言表示对方正在参与群聊；结合群消息内容，处理正事、求助或情绪低落时体谅对方。"
-                 "开口时围绕看到对方冒泡这一件事，语气轻松，给对方自由回复的空间。"
-                 f"当前时间：{now.isoformat()}。")
-        budget = self.living.config.context.private_chars
-        sections = [row.get("sent_text", row.get("topic", ""))[:600],
-                    json.dumps({"这次群里发言": activity["text"], "最近群聊": list(reversed(group_history))}, ensure_ascii=False),
-                    json.dumps(recipient, ensure_ascii=False),
-                    json.dumps(list(reversed(history)), ensure_ascii=False)]
-        labels = ["上次主动私聊：", "群里观察：", "彼此关系：", "最近私聊："]
-        size = max(0, (budget - len(guide) - sum(map(len, labels)) - 4) // 4)
-        prompt = guide + "\n".join(label + value[:size] for label, value in zip(labels, sections))
-        decision = await generate(self.living.ctx, self.store, self.living.config, "分享判断", prompt, ShareDecision)
-        row = self.store.get("share_receipt", row["id"])
-        if row.get("observed_at") or row.get("followup", "waiting") != "waiting":
-            return None
-        row["elsewhere"].update(status="noticed" if decision.send else "waiting", reason=decision.reason,
-                                decided_at=now.isoformat())
+    def opportunities(self, session, user, now):
+        result = []
+        for category in ("person_state", "share_receipt"):
+            for row in self.store.all(category):
+                activity = row.get("elsewhere", {})
+                if (activity.get("status") != "pending" or activity["session_id"] != session
+                        or activity["user_id"] != user
+                        or not timedelta() <= now - self.engine.time(activity["at"]) < timedelta(minutes=30)):
+                    continue
+                if category == "share_receipt" and (row.get("observed_at") or row.get("followup", "waiting") != "waiting"):
+                    continue
+                if category == "person_state" and self.engine.time(row["expires_at"]) <= now:
+                    continue
+                result.append((category, row))
+        return result
+
+    def encounter_context(self, session, user, now, group, *, offer=True):
+        if not self.living.config.proactive.enabled or self.living.sleeping(now) or self.living.quiet_sleep(now, session):
+            return []
+        sources = self.opportunities(session, user, now) if group and offer else []
+        if sources:
+            public_sleep = any(row["elsewhere"].get("kind") == "sleep" and row["elsewhere"].get("public") for _, row in sources)
+            return [{"stage": "群里遇见", "user_id": user,
+                     "observation": "这个人先前在本群说去睡了，现在又在群里发言" if public_sleep else "刚在群里遇见这个人，可以顺势打个招呼",
+                     "intimacy": self.living.intimacy(session, user),
+                     "guide": "结合当前话题决定是否轻轻接一句，也可以沉默；公开表达围绕眼前的群聊。"}]
+        person = self.living.person_key(session, user)
+        incoming = self.living.receipts.incoming.get((session, user))
+        for row in reversed(self.store.all("share_receipt")):
+            if row.get("mode") != "群聊接话" or not person or row.get("encounter_person") != person:
+                continue
+            if group and row["session"] != session:
+                continue
+            if not timedelta() <= now - self.engine.time(row["created"]) < timedelta(hours=2):
+                continue
+            if (not offer and row["outcome"] == "MaiBot 已受理" and row["session"] == session
+                    and incoming and self.engine.time(incoming["at"]) <= self.engine.time(row["created"])):
+                return [{"stage":"本轮群聊", "user_id":user, "guide":row["topic"]}]
+            if (row.get("sent_at") and row.get("sent_text") and incoming
+                    and self.engine.time(incoming["at"]) > self.living.receipts.time(row["sent_at"], now.tzinfo)):
+                return [{"stage":"接着聊", "user_id":user, "said":row["sent_text"][:300],
+                         "guide":"这是之前在共同群里实际说过的话。判断当前发言是否在回应它；相关就在当前聊天接着说，换话题就聊新话题。"}]
+        return []
+
+    def offered_context(self, session, user, now, included):
+        self.offered[session] = [(category, row["id"]) for category, row in self.opportunities(session, user, now)] if included else []
+
+    def observe_planner(self, session, items, now):
+        sources = self.offered.get(session, [])
+        if not sources:
+            return
+        calls = {item["tool_call"]["call_id"]: "reply" for item in items
+                 if item.get("item_type") == "FunctionCallItem" and item.get("tool_call", {}).get("func_name") == "reply"}
+        if not calls and any(item.get("item_type") == "FunctionCallItem" and item.get("tool_call", {}).get("func_name") != "stop" for item in items):
+            return
+        self.offered.pop(session, None)
+        activity = None
         with self.store.db:
-            self.store.put("share_receipt", row)
-        if not decision.send:
-            return None
-        intent = ("回到当前私聊轻轻打趣：刚看到对方在共同群聊冒泡，之前主动私聊尚未收到回复。"
-                  "说一句自然、亲近程度合适的话，围绕看到对方出现这一件事。"
-                  f"本次判断：{decision.reason}。关系参考：{json.dumps(recipient, ensure_ascii=False)[:600]}。")
-        return ("elsewhere:" + row["id"], intent, None)
+            for category, key in sources:
+                row = self.store.get(category, key)
+                activity = row["elsewhere"]
+                activity.update(status="handled" if calls else "silent", decided_at=now.isoformat())
+                self.store.put(category, row)
+            if calls:
+                self.store.put("share_receipt", {"id":"encounter:"+uuid4().hex, "session":session, "created":now.isoformat(),
+                    "mode":"群聊接话", "outcome":"MaiBot 已受理", "delivery":"等待本轮群聊回复回执", "calls":calls,
+                    "encounter_person":self.living.person_key(session, activity["user_id"]), "encounter_user":activity["user_id"],
+                    "topic":"本轮在群里遇见对方，结合当前话题自然接话。公开表达围绕眼前群聊，亲密程度沿用当前人物关系。"})

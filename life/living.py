@@ -872,7 +872,7 @@ class Living:
             if times and now < (next_at := max(times) + timedelta(minutes=config.cooldown_minutes)):
                 record("跳过", f"上次实际发送在 {max(times):%H:%M}，下次可请求时间 {next_at:%m-%d %H:%M}", session)
                 continue
-            if any(row["session"] == session and row["outcome"] == "MaiBot 已受理"
+            if any(row["session"] == session and row.get("mode") != "群聊接话" and row["outcome"] == "MaiBot 已受理"
                    for row in self.engine.store.all("share_receipt")):
                 record("跳过", "上一次主动交流正在等待回执", session)
                 continue
@@ -924,10 +924,6 @@ class Living:
                 notices.append(("greeting:" + greeting["key"], greeting["intent"], None))
             else:
                 greeting = None
-            if ordinary_hours and not notices:
-                followup = await self.presence.followup(session, now)
-                if followup:
-                    notices.append(followup)
             candidates, recipient = [], None
             if ordinary_hours and not notices and available:
                 try:
@@ -972,7 +968,7 @@ class Living:
             record_id = notices[0][0] if notices else event["id"]
             topic = "经历分享"
             if notices:
-                topics = {"elsewhere": "群里遇见", "anniversary": "纪念日", "reminder": "共同安排提醒", "confirmation": "安排确认",
+                topics = {"anniversary": "纪念日", "reminder": "共同安排提醒", "confirmation": "安排确认",
                           "thread": "话题跟进", "issue": "日程调整", "greeting": greeting["kind"] if greeting else "作息问候"}
                 topic = topics[record_id.split(":", 1)[0]]
                 score = f"本次处理{topic}"

@@ -209,7 +209,7 @@ class ShareReceipts:
         return at.replace(tzinfo=zone) if at.tzinfo is None else at.astimezone(zone)
 
     def context(self, session, now):
-        rows = sorted((r for r in self.store.all("share_receipt") if r["session"] == session and r.get("sent_at")
+        rows = sorted((r for r in self.store.all("share_receipt") if r["session"] == session and r.get("mode") != "群聊接话" and r.get("sent_at")
                        and timedelta() <= now - self.time(r["sent_at"], now.tzinfo) < timedelta(days=2)),
                       key=lambda r: r["sent_at"], reverse=True)[:3]
         return [{"id": r["id"], "topic": r.get("topic", r.get("share_activity", "生活分享")), "sent_at": r["sent_at"],
@@ -252,6 +252,6 @@ class ShareReceipts:
     def sent_times(self, session, zone):
         times = []
         for row in self.store.all("share_receipt"):
-            if row["session"] == session and row.get("sent_at"):
+            if row["session"] == session and row.get("mode") != "群聊接话" and row.get("sent_at"):
                 times.append(self.time(row["sent_at"], zone))
         return times

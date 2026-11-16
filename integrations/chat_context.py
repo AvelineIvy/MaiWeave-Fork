@@ -17,7 +17,7 @@ GUIDE = (
     "跨地点用 maiweave_space 查路线，目标填 goal_step_id；梦境说梦见，资讯带出处。\n"
 )
 
-LABELS = {"life_images": "已展示图片","chat_arrangements": "聊天约定", "pending_changes": "资料确认", "person_states": "人物近况", "shared_topics": "分享接话",
+LABELS = {"encounters": "群聊接话","life_images": "已展示图片","chat_arrangements": "聊天约定", "pending_changes": "资料确认", "person_states": "人物近况", "shared_topics": "分享接话",
           "plans": "日程", "schedule_issues": "日程调整", "schedule_notices": "日程通知",
           "bookshelf": "阅读笔记", "profiles": "人物资料", "relationships": "人物关系",
           "anniversaries": "纪念日", "continuity": "生活接续", "goals": "目标",
@@ -143,6 +143,7 @@ class ChatContext:
         add("pending_changes", pending, True)
         if cfg.people:
             add("person_states", people(p.presence.context(session, now)), True)
+        add("encounters", p.presence.encounter_context(session, self.speakers.get(session, ""), now, group, offer=stage == "Planner"), True)
         if cfg.sharing and p.config.proactive.enabled:
             add("shared_topics", p.living.receipts.context(session, now), True)
         if p.config.diary.chat_images_enabled:
@@ -221,6 +222,8 @@ class ChatContext:
                 omitted.append(LABELS[key])
         sections = [{"category": LABELS[key], "chars": len(dump({key: value})) - 1}
                     for key, value in snapshot.items() if key in LABELS]
+        if stage == "Planner":
+            p.presence.offered_context(session, self.speakers.get(session, ""), now, bool(snapshot.get("encounters") and snapshot["encounters"][0].get("stage") == "群里遇见"))
         result = GUIDE + dump(snapshot)
         self.recent.appendleft({"at": now.strftime("%m-%d %H:%M:%S"), "session": session,
             "chat": "群聊" if group else "私聊", "stage": stage, "mode": mode, "chars": len(result), "budget": budget,
