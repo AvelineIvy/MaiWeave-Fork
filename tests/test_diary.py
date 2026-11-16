@@ -12,7 +12,7 @@ def history(plugin, at):
 
 
 async def test_model_arranges_diary_and_only_writes_in_window(plugin):
-    now = plugin.now()
+    now = plugin.now().replace(hour=14, minute=0, second=0, microsecond=0) + timedelta(days=1)
     history(plugin, now - timedelta(minutes=1))
     start = now + timedelta(hours=1)
     plugin.ctx.llm.generate.return_value = {"success": True, "response": json.dumps({"start": start.isoformat(), "end": (start+timedelta(minutes=15)).isoformat(), "reason": "空闲时回顾"})}

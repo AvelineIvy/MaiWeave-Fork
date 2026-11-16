@@ -114,6 +114,8 @@ MaiWeave 让麦麦在聊天之外，也有自己的日程、兴趣和牵挂。�
 
 开启主动交流和作息问候后，麦麦会结合你们的关系与近期聊天，在起床或睡前找个合适的时机来问候。
 
+日常活动跟随你设定的入睡时间，睡前半小时再慢慢收尾，自动日记尽量提前写完。休息时仍可聊天，实际入睡后按作息设置保持安静。
+
 <p align="center">
   <a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/goodnight-chat.png"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/goodnight-chat.png" width="560" alt="麦麦睡前道晚安，记得对方昨晚加班，叮嘱早点休息"></a><br>
   <strong>睡前也惦记着你</strong> · 麦麦准备睡觉了，还记得你昨晚加班辛苦，过来抱抱、道声晚安。

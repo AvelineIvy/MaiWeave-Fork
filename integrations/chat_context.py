@@ -10,8 +10,8 @@ GUIDE = (
     "时间参照 now、timezone；计划是安排，simulated 为模拟，reported 为陈述，observed 为观测。"
     "用 maiweave 工具保存变化；记录查 maiweave_query，人物历史查 query_memory。"
     "资料冲突说明修改 ID，明确同意后用 maiweave_confirm_change。"
-    "sleep_policy.quiet=true时静默，否则可聊；清醒时闭目休息、阅读等活动可正常聊天。陪伴请求用maiweave_wake，awake=true后回应，awake=false 时结束本轮；醒来接上话题。群私聊共用。本轮提供 reply 工具时须调用它发送，after_reply=stop表示发送后结束；静默按MaiBot当前模式。"
-    "energy<=25时有些疲惫，表达简短自然，回应当前话题；是否静默按sleep_policy。"
+    "sleep_policy.quiet=true时按宿主模式静默，否则可聊。陪伴用maiweave_wake，awake=true后回应，false结束本轮；群私聊共用。提供reply时用它发送，after_reply=stop为发送后结束。"
+    "energy<=25时疲惫，简短接话；bedtime为预计入睡时间，普通休息照常聊，临睡或道别时说晚安。"
     "person_states 是当时近况，same_chat=false 时承接近况。shared_topics 是实际分享，接话用 maiweave_share_followup 关联 ID。"
     "读书沿用书名和笔记，原文与感想分别表述；查笔记用 maiweave_books 的 notes、book_id，安排阅读填 book_id。"
     "跨地点用 maiweave_space 查路线，目标填 goal_step_id；梦境说梦见，资讯带出处。\n"
@@ -100,6 +100,10 @@ class ChatContext:
                     "state": {k: state[k] for k in ("location", "energy", "mood")}, "current": current,
                     "sleep_policy": {"sleeping": p.living.sleeping(now), "quiet": p.living.quiet_sleep(now, session), "mode": "按作息生活" if p.config.life.schedule_enabled else "全天候交流",
                                      "awake_until": awake.isoformat() if awake else ""}}
+        bedtime = p.living.bedtime(now)
+        if bedtime:
+            snapshot["sleep_policy"].update(bedtime=bedtime.isoformat(timespec="minutes"),
+                                           minutes_until_bed=int((bedtime-now).total_seconds()/60))
         farewell = p.living.farewell(now)
         if farewell and farewell["farewell_session"] == session:
             snapshot["sleep_policy"]["farewell"] = "对方已道别，简短自然地回应晚安，reply 使用 after_reply=stop；本轮发送完毕后继续睡觉。"

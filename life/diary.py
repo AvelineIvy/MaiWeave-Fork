@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from ..integrations.chat_context import brief, dump
 from ..core.models import PlanInput
 from ..integrations.usage import generate
+from .living import in_hours, next_bedtime
 
 
 class DiaryMoment(BaseModel):
@@ -120,6 +121,11 @@ class Diary:
     async def arrange(self, now, spatial):
         if not self.config.diary.enabled:
             return
+        life = self.config.life
+        bedtime = next_bedtime(life, now)
+        if life.schedule_enabled and (in_hours(now.hour, life.sleep_hour, life.wake_hour)
+                or bedtime and bedtime - now <= timedelta(minutes=30)):
+            return
         store = self.engine.store
         day = now.date().isoformat()
         if any(p["kind"] == "diary" and (p.get("diary_day") or p["start"][:10]) == day
@@ -128,6 +134,8 @@ class Diary:
         prompt = (
             "为角色安排今天写生活日记的时间窗口，结合当前时间、作息和已有日程，选择未来空闲的10到20分钟。"
             "临近午夜时可安排到次日。输出 JSON：start、end（带时区的ISO时间）、reason（选择这个时间的理由）。"
+            "作息开启时，日记放在睡前收尾之前完成，给入睡前留30分钟洗漱和放松；今晚空档不足就选醒来后的空闲。"
+            f"下一次入睡：{bedtime.isoformat() if bedtime else '未设置待进入的睡眠'}；"
             f"现在：{now.isoformat()}；睡眠时间：{self.config.life.sleep_hour}至{self.config.life.wake_hour}；"
             f"遵循作息：{self.config.life.schedule_enabled}；已有日程：{json.dumps([p for p in store.all('plan') if p['status'] in {'scheduled', 'active'}], ensure_ascii=False)}"
         )
@@ -137,6 +145,14 @@ class Diary:
                 raise ValueError("日记时间应为未来的10到20分钟")
             if start.date() > now.date() + timedelta(days=1):
                 raise ValueError("请安排在今天或次日")
+            if life.schedule_enabled:
+                for offset in range(-1, 3):
+                    sleep = (now + timedelta(days=offset)).replace(hour=life.sleep_hour, minute=0, second=0, microsecond=0)
+                    wake = sleep.replace(hour=life.wake_hour)
+                    if wake <= sleep:
+                        wake += timedelta(days=1)
+                    if start < wake and end > sleep - timedelta(minutes=30):
+                        raise ValueError("日记请安排在入睡前30分钟之前完成，或醒来后的空闲")
             conflicts = [p for p in store.all("plan") if p["status"] in {"scheduled", "active"}
                          and self.engine.time(p["start"]) < end and self.engine.time(p["end"]) > start]
             if conflicts:

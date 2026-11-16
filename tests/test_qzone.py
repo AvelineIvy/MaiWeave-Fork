@@ -349,3 +349,14 @@ def test_qzone_web_form_and_cookie(monkeypatch):
         qzone_web.QzoneWeb("123456", "uin=o654321; p_skey=test")
     with pytest.raises(ValueError, match="p_skey"):
         qzone_web.QzoneWeb("123456", "uin=o123456")
+
+async def test_diary_completed_before_midnight_publishes_on_next_tick(plugin):
+    p=plugin;_,day=prepare(p);p.config.diary.publish_mode='日记完成后自动发布'
+    now=p.now().replace(hour=23,minute=58,second=30,microsecond=0)
+    plan=p.engine.create_plan(PlanInput(title='写日记',kind='diary',start=now.isoformat(),end=(now+timedelta(minutes=1)).isoformat()),'',now)
+    with p.store.db:
+        diary=p.store.get('diary',day);diary['plan_id']=plan['id'];p.store.put('diary',diary)
+    p.engine.advance(now)
+    p.engine.advance(now+timedelta(minutes=2))
+    await p.diary_publisher.process(now+timedelta(minutes=2))
+    assert p.store.get('diary_publication',day)['status']=='已发布'

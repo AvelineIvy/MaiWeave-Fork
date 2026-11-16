@@ -215,9 +215,7 @@ class DiaryPublisher:
             plan = self.store.find("plan", diary.get("plan_id", ""))
             if not plan or plan["status"] != "completed":
                 continue
-            # 昨晚开始、今天写完的日记，也在完成后发布。
-            if date != now.date() and self.engine.time(plan["end"]).astimezone(now.tzinfo).date() != now.date():
-                continue
+            # 昨天已完成而尚未发布的日记，也在下一轮检查时处理。
             if self.store.find("diary_publication", day):
                 continue
             await self.prepare(day, now)

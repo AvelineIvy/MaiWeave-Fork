@@ -22,6 +22,14 @@ def in_hours(hour: int, start: int, end: int) -> bool:
     return start <= hour < end if start < end else hour >= start or hour < end
 
 
+def next_bedtime(config, now):
+    """返回当前清醒时段之后的入睡时间，包含跨午夜作息。"""
+    if not config.schedule_enabled or in_hours(now.hour, config.sleep_hour, config.wake_hour):
+        return None
+    start = now.replace(hour=config.sleep_hour, minute=0, second=0, microsecond=0)
+    return start if start > now else start + timedelta(days=1)
+
+
 class Living:
     def __init__(self, engine: LifeEngine, context, config: MaiWeaveConfig, spatial, rhythm, world, continuity, memory):
         self.engine = engine
@@ -372,11 +380,7 @@ class Living:
         return changes
 
     def bedtime(self, now):
-        config = self.config.life
-        if not config.schedule_enabled or in_hours(now.hour, config.sleep_hour, config.wake_hour):
-            return None
-        start = now.replace(hour=config.sleep_hour, minute=0, second=0, microsecond=0)
-        return start if start > now else start + timedelta(days=1)
+        return next_bedtime(self.config.life, now)
 
     def activity_balance(self, now):
         """汇总今天实际进行的活动，以及最近连续的生活节奏。"""
@@ -534,6 +538,9 @@ class Living:
                 "短暂空闲可以安排10至20分钟休息，今天已经做了很久的事留到之后。kind 从 study/work/leisure/rest/cook/meal/social 中选择，出行由地点路线自动安排。"
                 "字段 title、kind、minutes（10到120）、location、motivation、goal_id（无关联填空字符串）。"
                 f"当前时间：{now.isoformat(timespec='minutes')}；可用分钟：{free}；"
+                f"预计入睡时间：{self.bedtime(now).isoformat(timespec='minutes') if self.bedtime(now) else '当前没有待进入的作息睡眠'}；"
+                "按这个实际作息安排生活，睡前最后30分钟再洗漱、收拾和放松收尾；更早的空闲继续日常活动。"
+                "普通休息用于恢复精力，休息结束后结合恢复程度和刚做过的事选择后续；已有日记等事项先按顺序完成，再准备入睡。"
                 f"今日实际活动与最近节奏：{json.dumps(balance, ensure_ascii=False)}；"
                 "结合累计时长、连续次数、饭点和身体状态决定继续还是换活动；有具体进展或兴致时可以继续。"
                 "做饭、备菜和烹饪使用cook，吃饭使用meal，洗碗收拾使用leisure。"

@@ -25,8 +25,8 @@ async def test_rest_and_sleep_share_and_send(plugin, session, kind):
         occurred_at=now.isoformat(), source="simulated", evidence="角色模拟"), session, now)
     text = plugin.context_text(session)
     assert json.loads(text.split("\n")[-1])["sleep_policy"]["sleeping"] == (kind == "sleep")
-    assert "清醒时闭目休息、阅读等活动可正常聊天" in text
-    assert "本轮提供 reply 工具时" in text
+    assert "普通休息照常聊" in text
+    assert "提供reply时用它发送" in text
     assert await plugin.sleep_before_send({"session_id": session}) == {"action": "abort" if kind == "sleep" else "continue"}
     await plugin.living.share(now)
     assert plugin.ctx.maisaka.proactive.trigger.await_count == (0 if kind == "sleep" else 1)

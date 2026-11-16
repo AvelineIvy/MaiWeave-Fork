@@ -110,7 +110,7 @@ async def test_travel_time_and_recurring_plans_use_relationship(plugin, monkeypa
 
 
 async def test_diary_corrects_conflicting_slot_and_rearranges_cancelled_window(plugin):
-    now=plugin.now()
+    now=plugin.now().replace(hour=14,minute=0,second=0,microsecond=0)+timedelta(days=1)
     fixed=plugin.engine.create_plan(PlanInput(title="聊天约定",start=(now+timedelta(minutes=10)).isoformat(),
         end=(now+timedelta(minutes=30)).isoformat(),participants=["小明"]),"a",now)
     def slot(minutes):
