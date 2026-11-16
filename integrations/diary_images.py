@@ -31,7 +31,7 @@ class IllustratedText(BaseModel):
     selfie: bool = False
 
 
-SELFIE_COMPOSITION = "前置自拍成片：观看者的位置就是镜头，镜头距脸较近并略高于视线，人物看向镜头，轻微广角、自然裁切与略倾斜构图。持机侧肩膀靠近镜头，设备和持机手处于画外，另一只手可展示物件。"
+SELFIE_COMPOSITION = "前置自拍成片：观看者的位置就是镜头，镜头距脸较近并略高于视线，人物看向镜头，脸靠画面一侧，头部自然裁切，轻微广角与略倾斜构图。持机侧肩膀靠近镜头，设备和持机手处于画外，另一只手可将物件举到脸旁前景展示。"
 
 
 CHARACTER_FIELDS = ("image_character_enabled", "image_character_reference_enabled", "image_character_reference_url",
@@ -81,7 +81,7 @@ class DiaryImages:
         text = IMAGE_INSTRUCTION + (
             "同时输出 selfie 布尔值：用户要求前置自拍、或本次画面选用前置自拍时为 true，"
             "物件随手拍、旁观抓拍和对镜拍照为 false。画面描述只安排主体、动作、场景和视角，画风由用户设置提供。"
-            "自拍时单手持机、另一只手展示物件；物件随手拍采用第一人称近景或俯拍；看做事的样子可用旁观抓拍。"
+            "自拍时单手持机、另一只手展示物件；物件随手拍采用第一人称近景或俯拍，物件为主体，按需展示局部手部，脸和身体留在画外；看做事的样子可用旁观抓拍。"
             "沿用本次用户的拍摄要求，场景与时段取自素材。")
         if self.config.diary.image_character_enabled:
             text += ("同时输出 character_visible 布尔值：画面包含麦麦本人时为 true，物件或风景特写为 false。"
