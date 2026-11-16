@@ -113,6 +113,7 @@ class ChatContext:
         confirmation = {"pending_changes": [{k: r[k] for k in ("id", "action")} for r in pending[:1]]} if pending else {}
         if len(GUIDE) + len(dump({**snapshot, **confirmation})) > budget:
             # 小预算优先保留操作关联，地点共用状态中的名称，展示文字取短摘要。
+            snapshot["sleep_policy"].pop("minutes_until_bed", None)
             current = snapshot["current"]
             if current.get("location") == snapshot["state"]["location"]:
                 current.pop("location", None)

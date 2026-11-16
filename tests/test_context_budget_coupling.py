@@ -13,8 +13,13 @@ from test_plugin import plugin
 @pytest.mark.parametrize("session", ["group", "private"])
 @pytest.mark.parametrize("budget", [1200, 2400, 4800])
 @pytest.mark.parametrize("action", ["anniversary", "delete_anniversary"])
-async def test_linked_activity_and_confirmation_fit_budget(plugin, session, budget, action):
+@pytest.mark.parametrize("sleep_hour", [None, 1, 2])
+async def test_linked_activity_and_confirmation_fit_budget(plugin, session, budget, action, sleep_hour):
     now = plugin.now()
+    if sleep_hour is not None:
+        plugin.config.life.sleep_hour = sleep_hour
+        now = (now + timedelta(days=1)).replace(hour=sleep_hour, minute=0, second=0, microsecond=0) - timedelta(minutes=40)
+        plugin.now = lambda: now
     with plugin.store.db:
         plugin.store.put("state", {**plugin.engine.state(), "energy": 20})
     plugin.chat_context.kinds[session] = session
@@ -37,6 +42,8 @@ async def test_linked_activity_and_confirmation_fit_budget(plugin, session, budg
     assert snapshot["pending_changes"][0]["id"] == "r" * 32
     assert snapshot["sleep_policy"]["awake_until"]
     assert snapshot["sleep_policy"]["quiet"] is False
+    if sleep_hour is not None:
+        assert snapshot["sleep_policy"]["bedtime"] == (now + timedelta(minutes=40)).isoformat(timespec="minutes")
     assert plugin.store.get("plan", plan["id"])["title"] == before["title"]
     report = plugin.chat_context.recent[0]
     assert report["chars"] == len(text)

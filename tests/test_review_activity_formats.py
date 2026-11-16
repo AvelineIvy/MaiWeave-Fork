@@ -44,3 +44,17 @@ async def test_hidden_continuation_is_corrected(plugin):
     assert len(candidates)==12 and 'idea-00' not in {r['id'] for r in candidates}
     assert p.engine.current(now)['continuation_id']==''
     assert p.ctx.llm.generate.await_count==2
+
+async def test_recently_updated_old_continuation_stays_available(plugin):
+    from datetime import timedelta
+    p=plugin;now=p.now().replace(hour=12,minute=0,second=0,microsecond=0);set_time(p,now)
+    p.config.life.autonomous=True;p.config.life.schedule_enabled=False
+    with p.store.db:
+        for i in range(13):p.store.put('activity_memory',{'id':f'idea-{i:02}','session_id':'','kind':'leisure','next_action':'整理桌面','updated_at':(now-timedelta(days=1)).isoformat()})
+        p.store.put('activity_memory',{**p.store.get('activity_memory','idea-00'),'updated_at':now.isoformat()})
+    p.ctx.llm.generate.return_value={'success':True,'response':json.dumps({'title':'整理桌面','kind':'leisure','minutes':10,'location':'住处','motivation':'接着整理','continuation_id':''})}
+    await p.living.choose_activity(now)
+    prompt=p.ctx.llm.generate.call_args.args[0]
+    candidates=json.loads(prompt.split('可接续的具体念头：')[1].split('。选择接续')[0])
+    assert len(candidates)==12 and candidates[-1]['id']=='idea-00'
+    assert 'idea-01' not in {r['id'] for r in candidates}

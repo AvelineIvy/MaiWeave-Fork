@@ -506,7 +506,7 @@ class Living:
         continuations = [r for r in engine.store.all("activity_memory") if r["next_action"] and r["id"] not in arranged
                          and r.get("kind") in {"study", "work", "leisure", "rest", "cook", "meal", "social"}
                          and (not r.get("next_date") or r["next_date"] <= now.date().isoformat())]
-        continuations = continuations[-12:]
+        continuations = sorted(continuations, key=lambda row: engine.time(row["updated_at"]))[-12:]
         if config.schedule_enabled and in_hours(now.hour, config.sleep_hour, config.wake_hour):
             source = "日常作息"
             title, kind, location, motivation = "睡觉", "sleep", self.spatial.place("home")["name"], "按习惯休息，恢复精力"
