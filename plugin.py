@@ -120,7 +120,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
             ('diary', 'diary', '生活日记', '安排写日记，整理空间随笔。', ['enabled', 'publish_mode', 'publish_visibility']),
             ('model_default', 'life', '默认生活模型', '各功能选择跟随默认时使用此任务。', ['model_task']),
             ('model_arrangement', 'models', '日常安排', '按功能选择 MaiBot 已配置的模型任务。', ['activity', 'diary_schedule', 'habits', 'goals']),
-            ('model_expression', 'models', '阅读与表达', '设置活动感想、阅读、日记、梦境和空间文案使用的任务。', ['outcomes', 'reading', 'diary', 'dreams', 'qzone']),
+            ('model_expression', 'models', '阅读与表达', '设置活动感想、阅读、日记、梦境、空间文案和配图提示词使用的任务。', ['outcomes', 'reading', 'diary', 'dreams', 'qzone', 'image_prompt']),
             ('model_information', 'models', '资料整理', '设置资料核对和城市地点整理使用的任务。', ['review', 'places']),
             ('reading_rhythm', 'books', '日常阅读', '给读书留一点时间，也留时间做别的事。', ['autonomous_minutes']),
             ('rhythm', 'rhythm', '重复日程与习惯', '选择是否学习和参考生活习惯。', ['habits_enabled', 'follow_habits']),

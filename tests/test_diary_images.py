@@ -201,3 +201,45 @@ async def test_image_style_follows_use(plugin, monkeypatch, category, expected):
     images.put(category, {"id": "style-test", "status": "草稿", "content": "窗边茶杯"})
     await images.illustrate(category, "style-test", p.now(), "窗边茶杯")
     assert prompts == ["窗边茶杯\n画面风格：" + expected]
+
+
+@pytest.mark.parametrize("category", ["experience_image", "diary_publication"])
+async def test_missing_image_prompt_uses_selected_text_model(plugin, monkeypatch, category):
+    p = plugin
+    service(p, monkeypatch)
+    p.config.models.image_prompt = "prompt-task"
+    p.config.models.diary = "diary-task"
+    p.config.models.qzone = "qzone-task"
+    p.ctx.llm.generate.side_effect = None
+    p.ctx.llm.generate.return_value = {"success": True, "response": json.dumps({"content": "茶杯", "image_prompt": "窗边的茶杯"})}
+    images = p.diary_publisher.images
+    images.put(category, {"id": "prompt-test", "status": "草稿", "content": "窗边的茶杯"})
+    await images.illustrate(category, "prompt-test", p.now())
+    assert p.ctx.llm.generate.call_args.kwargs["task_name"] == "prompt-task"
+    assert any(row["feature"] == "配图提示词" for row in p.store.all("model_usage"))
+    p.ctx.llm.generate.reset_mock()
+    await images.illustrate(category, "prompt-test", p.now())
+    p.ctx.llm.generate.assert_not_awaited()
+    await images.illustrate(category, "prompt-test", p.now(), "用户填写的提示词")
+    p.ctx.llm.generate.assert_not_awaited()
+    await p.ui_test_image()
+    import asyncio
+    await asyncio.gather(*list(p.jobs))
+    p.ctx.llm.generate.assert_not_awaited()
+
+
+async def test_auto_space_prompt_stays_with_space_writer(plugin, monkeypatch):
+    p = plugin
+    now, day = prepare(p)
+    service(p, monkeypatch)
+    p.config.diary.image_enabled = True
+    p.config.models.qzone = "space-task"
+    p.config.models.image_prompt = "prompt-task"
+    p.ctx.llm.generate.return_value = {"success": True, "response": json.dumps({"content": "午后读书", "image_prompt": "窗边的书"}), "total_tokens": 37}
+    await p.diary_publisher.prepare(day, now)
+    assert p.ctx.llm.generate.await_count == 1
+    assert p.ctx.llm.generate.call_args.kwargs["task_name"] == "space-task"
+    rows = p.store.all("model_usage")
+    assert [r["feature"] for r in rows] == ["空间文案", "空间配图"]
+    usage = await p.ui_usage(feature="空间文案")
+    assert usage["totals"]["calls"] == 1 and usage["totals"]["total"] == 37

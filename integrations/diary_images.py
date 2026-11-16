@@ -99,7 +99,7 @@ class DiaryImages:
                  "total_tokens": None, "prompt_cache_hit_tokens": None}
         try:
             if not prompt:
-                idea = await generate(self.ctx, self.store, self.config, "空间文案" if category == "diary_publication" else "生活日记",
+                idea = await generate(self.ctx, self.store, self.config, "配图提示词",
                     IMAGE_INSTRUCTION + "正文沿用下面的内容，只补充画面描述：" + row["content"][:4000], IllustratedText)
                 prompt = idea.image_prompt
             row["image_prompt"] = prompt

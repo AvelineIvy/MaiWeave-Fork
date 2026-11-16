@@ -207,6 +207,7 @@ MODEL_FEATURES = {
     "资料核对": "review",
     "城市地点": "places",
     "空间文案": "qzone",
+    "配图提示词": "image_prompt",
 }
 
 
@@ -222,6 +223,7 @@ class ModelConfig(PluginConfigBase):
     dreams: str = setting("梦境", default="跟随默认", description="结合睡眠和经历生成梦境；选择跟随默认时使用默认生活模型。")
     review: str = setting("资料核对", default="跟随默认", description="理解个人资料与人物关系变更；选择跟随默认时使用默认生活模型。")
     places: str = setting("城市地点", default="跟随默认", description="从搜索资料中整理生活地点；选择跟随默认时使用默认生活模型。")
+    image_prompt: str = setting("图片生成提示词模型", default="跟随默认", description="根据生活经历或空间文案编写配图提示词，用于聊天配图和空间配图缺少提示词时的补充。选择跟随默认时使用默认生活模型。")
     qzone: str = setting("空间文案", default="跟随默认", description="根据日记生成空间随笔；选择跟随默认时使用默认生活模型。")
 
 
