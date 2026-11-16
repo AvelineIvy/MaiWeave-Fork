@@ -128,8 +128,8 @@ class DiaryConfig(PluginConfigBase):
 
     __ui_label__ = "生活日记"
     publish_mode: Literal["关闭", "手动发布", "日记完成后自动发布"] = setting("日记发空间", default="关闭", description="通过已连接的 SnowLuma 或 NapCat 发布生活随笔和可选配图。自动模式在写日记日程结束后发布当天日记，每天一篇。")
-    image_service_enabled: bool = setting("启用图片生成服务", default=False, description="开启后可生成空间随笔配图和聊天图片。")
-    chat_images_enabled: bool = setting("聊天中展示生活图片", default=False, description="允许追问时发图，以及主动分享时由模型选择配图；同一经历复用已保存图片。")
+    image_service_enabled: bool = setting("启用图片生成服务", default=False, description="开启后可生成空间随笔配图和聊天图片；关闭后仍可查看、发送已有图片。")
+    chat_images_enabled: bool = setting("聊天中展示生活图片", default=False, description="允许追问时发图，以及主动分享时由模型选择配图；同一经历复用已保存图片。关闭后聊天不提供发图工具。")
     image_enabled: bool = setting("空间随笔自动配图", default=False, description="开启图片生成服务后，为新写好的空间随笔生成一张配图；关闭此项可在详情中手动生成。聊天配图由「聊天中展示生活图片」控制。")
     image_base_url: str = setting("生图接口地址（生图必填）", default="https://api.openai.com/v1", description="填写所选图片接口的基础地址；OpenAI 与通义兼容地址通常包含 /v1，Gemini 与 DashScope 填服务根地址。")
     image_api_key: str = setting("生图 API Key（生图必填）", default="", description="填写图片生成服务提供的密钥。", json_schema_extra={"x-widget": "password", "input_type": "password"})

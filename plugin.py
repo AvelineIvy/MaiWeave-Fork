@@ -370,8 +370,10 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
 
     @HookHandler("maisaka.planner.before_request")
     async def planner_context(self, **kwargs):
+        if "tool_definitions" in kwargs:
+            kwargs["tool_definitions"] = self.life_images.tool_definitions(kwargs["tool_definitions"], kwargs["session_id"])
         if not self.config.life.enabled:
-            return {"action": "continue"}
+            return {"action": "continue", "modified_kwargs": kwargs}
         session = kwargs["session_id"]
         self.living.receipts.turn[session] = planner_task(kwargs["items"])
         kwargs["items"] = [i for i in kwargs["items"] if i.get("meta", {}).get("item_id") != "maiweave-life-context"]

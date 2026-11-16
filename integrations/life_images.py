@@ -22,9 +22,30 @@ class LifeImages:
         return bool(image.get("image_file") and image.get("content") == self.content(event))
 
     def candidates(self, session):
-        rows = sorted(self.engine.experiences(session), key=lambda row: row["occurred_at"], reverse=True)[:10]
-        return [{"id": row["id"], "summary": row["summary"][:200], "occurred_at": row["occurred_at"],
-                 "has_image": self.reusable(row, self.store.find("experience_image", row["id"]) or {})} for row in rows]
+        if not self.config.diary.chat_images_enabled:
+            return []
+        rows = sorted((row for row in self.store.all("experience") if self.engine.visible(row, session)),
+                      key=lambda row: self.engine.time(row["occurred_at"]), reverse=True)
+        candidates = [{"id": row["id"], "summary": row["summary"][:200], "occurred_at": row["occurred_at"],
+                       "has_image": self.reusable(row, self.store.find("experience_image", row["id"]) or {})} for row in rows]
+        if not self.config.diary.image_service_enabled:
+            candidates = [row for row in candidates if row["has_image"]]
+        return candidates[:10]
+
+    def tool_definitions(self, definitions, session):
+        """按当前聊天可用的图片能力提供工具。"""
+        enabled = self.config.life.enabled and self.config.diary.chat_images_enabled
+        enabled = enabled and (self.config.diary.image_service_enabled or bool(self.candidates(session)))
+        result = []
+        for tool in definitions:
+            function = tool.get("function", {})
+            if function.get("name") == "maiweave_show_life":
+                if not enabled:
+                    continue
+                if not self.config.diary.image_service_enabled:
+                    tool = {**tool, "function": {**function, "description": "展示当前聊天可用的已有生活图片。list查询已有图片的经历编号，send按experience_id将已有图片发到当前聊天。"}}
+            result.append(tool)
+        return result
 
     async def requested(self, experience_id, session, now, *, framing=""):
         """追问图片的后台任务失败时，在原聊天告知结果。"""

@@ -25,7 +25,9 @@ class FeatureTools:
         self.require_life()
         session = kwargs["stream_id"]
         if action == "list":
-            return {"enabled": self.config.diary.chat_images_enabled, "items": self.life_images.candidates(session)}
+            items = self.life_images.candidates(session)
+            return {"enabled": self.config.diary.chat_images_enabled and (self.config.diary.image_service_enabled or bool(items)),
+                    "generation_enabled": self.config.diary.image_service_enabled, "items": items}
         if action != "send":
             raise ValueError("请选择查询或发送图片")
         event = self.engine.owned("experience", experience_id, session)

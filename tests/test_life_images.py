@@ -107,3 +107,57 @@ async def test_corrected_experience_regenerates_image(plugin, monkeypatch):
     row = p.store.get("experience_image", event["id"])
     assert row["image_file"] != original
     assert "心形" in row["content"] and "心形" in row["image_prompt"]
+
+
+async def test_image_tool_follows_switches_and_chat_ownership(plugin, monkeypatch):
+    import copy
+    p = plugin
+    now, event = setup(p, monkeypatch)
+    tools = [{"type": "function", "function": {"name": "maiweave_show_life", "description": "生成或复用图片"}},
+             {"type": "function", "function": {"name": "maiweave_query", "description": "查询生活"}}]
+    original = copy.deepcopy(tools)
+
+    async def definitions(session="chat-a"):
+        result = await p.planner_context(session_id=session, items=[], tool_definitions=tools)
+        return result["modified_kwargs"]["tool_definitions"]
+
+    assert len(await definitions()) == 2
+    p.config.diary.image_service_enabled = False
+    assert len(await definitions()) == 1
+    assert (await p.show_life("list", stream_id="chat-a"))["items"] == []
+    p.config.diary.image_service_enabled = True
+    await p.life_images.send(event["id"], "chat-a", now)
+    p.config.diary.image_service_enabled = False
+    p.ctx.llm.generate.reset_mock()
+    available = await definitions()
+    assert "已有" in available[0]["function"]["description"]
+    assert "生成" not in available[0]["function"]["description"]
+    assert len(await definitions("chat-b")) == 1
+    result = await p.show_life("send", event["id"], stream_id="chat-a")
+    assert result["status"] == "已发送"
+    p.ctx.llm.generate.assert_not_awaited()
+    p.config.diary.chat_images_enabled = False
+    assert len(await definitions()) == 1
+    assert (await p.show_life("list", stream_id="chat-a"))["enabled"] is False
+    with pytest.raises(ValueError, match="聊天图片已关闭"):
+        await p.show_life("send", event["id"], stream_id="chat-a")
+    p.config.diary.chat_images_enabled = True
+    p.config.life.enabled = False
+    assert len(await definitions()) == 1
+    assert tools == original
+
+
+async def test_service_off_lists_existing_images_before_recent_limit(plugin, monkeypatch):
+    from datetime import timedelta
+    p = plugin
+    now, event = setup(p, monkeypatch)
+    await p.life_images.send(event["id"], "chat-a", now)
+    for index in range(11):
+        p.engine.record_experience(ExperienceInput(summary=f"新的生活片刻{index}", source="simulated",
+            occurred_at=(now + timedelta(minutes=index + 1)).isoformat(), evidence="生活记录"), "chat-a", now + timedelta(minutes=index + 1))
+    p.config.diary.image_service_enabled = False
+    assert [row["id"] for row in p.life_images.candidates("chat-a")] == [event["id"]]
+    event["summary"] = "修改后的书签"
+    with p.store.db:
+        p.store.put("experience", event)
+    assert p.life_images.candidates("chat-a") == []
