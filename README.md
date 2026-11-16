@@ -2,8 +2,6 @@
 
 <img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/banner.png" width="800" alt="MaiWeave：让麦麦有自己的生活，也让你参与其中">
 
-<img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/icon.png" width="128" alt="MaiWeave 插件图标">
-
 # MaiWeave · 麦织｜角色生活引擎
 
 **给 MaiBot 一套自己的生活，让你的聊天也能改变它的一天。**
@@ -26,7 +24,7 @@
 
 </div>
 
-MaiWeave 让麦麦在聊天之外，也有自己的日程、兴趣和牵挂。你可以参与它的一天，改变一个安排，接着上次读过的书聊，也可以等它带着新鲜事来找你。
+[日常互动](#-有了生活聊天会有什么不同) · [功能一览](#-麦麦的生活里有什么) · [界面与聊天](#-看看麦麦的一天) · [安装设置](#-安装与设置)
 
 ## 🌱 有了生活，聊天会有什么不同？
 
@@ -70,6 +68,7 @@ MaiWeave 让麦麦在聊天之外，也有自己的日程、兴趣和牵挂。�
 | 🔎 **联网见闻** | 按兴趣检索和阅读资料，记下来源与感想，把想尝试的事放进后续生活。 |
 | 🌱 **状态与成长** | 精力、饥饿和心情随活动变化；活动可以接着上次的进展展开，积累习惯、推进长期目标。 |
 | 🎂 **生日与纪念日** | 关联 MaiBot 人物，配置公历或农历日期，向选定的聊天流发送祝福和提醒。 |
+| 📷 **角色与图片** | 共用角色卡和参考图，追问时展示生活小事，主动分享与空间随笔也可以配图；在 WebUI 中调整画风、试画和预览。 |
 | 📝 **日记、梦境与空间** | 留下日记和梦境，把一天的片段整理成随笔，预览后发布或自动发到 QQ 空间。 |
 | 🧠 **经历与记忆** | 保存经历细节、补充事实、回看修订记录，并与 MaiBot 原生记忆衔接。 |
 | 🏡 **WebUI 与状态 API** | 查看生活状态、管理日程和书架、统计模型用量；通过只读 API 获取状态与行为判断。 |
@@ -78,10 +77,23 @@ MaiWeave 让麦麦在聊天之外，也有自己的日程、兴趣和牵挂。�
 
 ## 📷 看看麦麦的一天
 
+### 🏡 生活面板 · 今天过得怎么样？
+
+当前活动、一天的轨迹、精力心情和主动交流记录，都能在「此刻生活」里找到。
+
 <p align="center">
-  <a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-overview.png"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-overview.png" width="1000" alt="此刻生活页面，展示当前活动、精力心情与一天的日程"></a><br>
-  <sub>正在做什么、今天过得怎样，打开「此刻生活」就能看到。</sub>
+  <a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-overview.png"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-overview.png" width="800" alt="当前睡眠状态、一天的日程、主动交流与状态变化"></a>
 </p>
+
+### 📸 图文分享 · 做好了，想给你看看
+
+饭菜、手工作品，或路上看到的小景，都可以成为一条带图的分享。你也可以接着问：“是什么样的？给我看看。”
+
+<p align="center">
+  <a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-image-chat.png"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-image-chat.png" width="620" alt="分享猫咪蛋包饭和围着紫色围巾的手工兔子"></a>
+</p>
+
+开启方式：在 **插件配置 → 模型设置** 配好图片生成服务，并开启 **图片用途 → 聊天追问发图与主动分享配图**。外貌、参考图和画风在 **此刻生活 → 角色与图片** 调整，保存后可以「试画一张」。新图使用横版 4:3，同一经历已有图片时继续复用。[查看图片使用说明 →](https://github.com/ilworkcn/MaiWeave/blob/main/docs/使用手册.md#聊天里看看麦麦做了什么)
 
 ## 📖 上传一本书，开始阅读
 
@@ -97,8 +109,6 @@ MaiWeave 让麦麦在聊天之外，也有自己的日程、兴趣和牵挂。�
 自主阅读默认每天最多 90 分钟，单次最多 40 分钟，两次之间留出 60 分钟做别的事。在「日程与成长 → 日常阅读」可以修改每日上限，-1 表示每日无上限，0 表示关闭自主阅读；单次时长和间隔在「高级设置 → 自主阅读节奏」调整；聊天和书架里手动约好的阅读照常执行。
 
 </details>
-
-### 读到有意思的地方，来找你聊聊
 
 <p align="center">
   <a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/reading-share.png"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/reading-share.png" width="560" alt="麦麦读过书后主动分享对人物的感想"></a><br>
@@ -123,7 +133,9 @@ MaiWeave 让麦麦在聊天之外，也有自己的日程、兴趣和牵挂。�
 
 ## 📝 把一天的日常，写进 QQ 空间
 
-麦麦写完日记，可以从当天的生活片段中整理一篇随笔，发到自己的 QQ 空间。日记和空间文案分别保存，你可以先看看它写了什么，再修改、发布。在模型设置中开启图片生成服务，并在「模型设置 → 图片用途」开启聊天图片后，问一句“给我看看”，麦麦就能展示那件生活小事，主动分享时也会按话题配图。同一经历会复用已保存的图片。在「此刻生活 → 角色与图片」填写外貌和常用穿着，聊天与空间的人物画面就会共用这份设定。配置图片生成服务后，还能为空间随笔配一张生活插画，在详情中修改画面描述、重画和预览。
+麦麦写完日记，可以从当天的片段中整理一篇随笔，发到自己的 QQ 空间。日记和空间文案分别保存，你可以先看看，再修改、发布。
+
+想给随笔配图，在 **模型设置 → 图片用途** 开启 **空间随笔自动配图**。空间与聊天共用角色卡和参考图，画风可以分别设置；在随笔详情中还能修改画面描述、重画和预览。
 
 在 **日记与梦境 → 日记详情 → 日记发空间** 中生成和编辑文案。发布默认关闭，可选择手动发布，或随当天写日记日程完成后自动发布，每天一篇；可见范围支持好友、所有人和仅自己。
 
@@ -147,6 +159,7 @@ MaiWeave 让麦麦在聊天之外，也有自己的日程、兴趣和牵挂。�
 | 成长与接续 | 推进长期目标、作品阶段、习惯和待跟进话题 |
 | 人物与纪念日 | 关联人物画像、设置关系、生日与纪念日 |
 | 日记与梦境 | 回顾一天、查看日记素材、睡眠与梦境；生成和发布空间随笔 |
+| 角色与图片 | 编辑外貌和画风、管理参考图，试画自拍或物件近景 |
 | 模型用量 | 查看 Token、调用次数、耗时，以及最近 10 次聊天注入的字符数和内容组成 |
 
 </details>
@@ -180,6 +193,7 @@ MaiWeave 让麦麦在聊天之外，也有自己的日程、兴趣和牵挂。�
 | 调整聊天中的生活细节 | 在「聊天上下文」为群聊、私聊分别选择精简、均衡或丰富，并调整内容分类与字符上限；当前活动、经历和接续按话题整理，同一内容合并展示 |
 | 按城市安排外出 | 设置天气城市，开启 MaiBot 联网搜索和自动搜索生活地点 |
 | 记住你和重要的日子 | 连接 MaiBot 记忆，在「人物与纪念日」选择人物画像，填写生日、纪念日和提醒聊天流 |
+| 展示生活图片 | 配好图片生成服务，开启聊天图片，在「角色与图片」设置外貌、参考图和画风 |
 | 收到主动消息和祝福 | 开启主动交流，在个人资料中选择「交流与提醒聊天流」 |
 
 **接上麦麦已有的记忆。** 在 MaiBot 人物画像中选中你，补上生活备注、生日和纪念日，让之后的相处接着这些记忆继续。同机运行的 MaiBot 1.4 可自动连接，状态在人物页面查看。[记忆连接设置 →](https://github.com/ilworkcn/MaiWeave/blob/main/docs/配置指南.md)
@@ -221,7 +235,7 @@ uv pip install --python .venv -r plugins/MaiWeave/requirements.txt
 
 ## 💚 感谢与许可
 
-MaiWeave 的早期设计参考了 [Mai_life](https://github.com/octmicy/Mai_life)。感谢 [MaiBot 插件 SDK](https://github.com/Mai-with-u/maibot-plugin-sdk) 和 [lunar-python](https://github.com/6tail/lunar-python)。
+MaiWeave 早期版本的部分设计参考了 [Mai_life](https://github.com/octmicy/Mai_life)。感谢 [MaiBot 插件 SDK](https://github.com/Mai-with-u/maibot-plugin-sdk) 和 [lunar-python](https://github.com/6tail/lunar-python)。
 
 感谢每一位为 MaiWeave 提出建议、反馈问题和参与测试的朋友。你们分享的使用体验、发现的小问题和想到的新点子，让麦麦的日常一点点变得更丰富。
 
