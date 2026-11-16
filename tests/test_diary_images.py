@@ -18,40 +18,53 @@ PNG = buffer.getvalue()
 def service(p, monkeypatch):
     p.config.diary.image_service_enabled = True
     p.config.diary.image_api_key = 'test-key'
-    monkeypatch.setattr(type(p.diary.images), 'request', lambda self, prompt: (PNG, {'input_tokens': 20, 'output_tokens': 40, 'total_tokens': 60}))
+    monkeypatch.setattr(type(p.diary_publisher.images), 'request', lambda self, prompt: (PNG, {'input_tokens': 20, 'output_tokens': 40, 'total_tokens': 60}))
 
 
-async def test_private_and_public_images_keep_separate_files_and_publish(plugin, monkeypatch):
+def legacy_image(p, day):
+    """准备升级前保存的日记图片。"""
+    path = Path(p.ctx.paths.data_dir) / "diary_images" / "legacy.png"
+    path.parent.mkdir(exist_ok=True)
+    path.write_bytes(PNG)
+    row = p.store.get('diary', day)
+    row.update(image_file='diary_images/legacy.png', image_prompt='旧日记配图', image_status='已生成')
+    with p.store.db: p.store.put('diary', row)
+    return row
+
+
+async def test_public_image_and_publish_keep_legacy_diary_file(plugin, monkeypatch):
     p = plugin
     now, day = prepare(p)
     service(p, monkeypatch)
+    private = legacy_image(p, day)
     await p.diary_publisher.prepare(day, now)
-    private = await p.diary.images.illustrate('diary', day, now, '私人日记中的窗边')
     public = await p.diary_publisher.illustrate(day, now, '空间随笔中的茶杯')
     assert private['image_file'] != public['image_file']
-    assert p.diary.images.preview(private).startswith('data:image/jpeg;base64,')
-    assert p.store.all('model_usage')[-1]['total_tokens'] == 60
+    assert p.diary_publisher.images.preview(public).startswith('data:image/jpeg;base64,')
+    assert p.store.all('model_usage')[-1]['feature'] == '空间配图'
     await p.diary_publisher.publish(day, now)
     assert p.ctx.call_capability.call_args.kwargs['args']['params']['images'][0].startswith('base64://')
-    assert p.store.get('diary', day)['image_prompt'] == '私人日记中的窗边'
+    assert p.store.get('diary', day)['image_prompt'] == '旧日记配图'
+    assert (Path(p.ctx.paths.data_dir) / private['image_file']).exists()
 
 
 async def test_failed_redraw_keeps_image_and_text(plugin, monkeypatch):
     p = plugin
     now, day = prepare(p)
     service(p, monkeypatch)
-    row = await p.diary.images.illustrate('diary', day, now, '台灯')
+    await p.diary_publisher.prepare(day, now)
+    row = await p.diary_publisher.images.illustrate('diary_publication', day, now, '台灯')
     original = row['image_file']
     def fail(self, prompt):
         raise TimeoutError('生图超时')
-    monkeypatch.setattr(type(p.diary.images), 'request', fail)
+    monkeypatch.setattr(type(p.diary_publisher.images), 'request', fail)
     with pytest.raises(TimeoutError):
-        await p.diary.images.illustrate('diary', day, now, '书桌')
-    row = p.store.get('diary', day)
-    assert row['image_file'] == original and row['status'] == '已生成'
+        await p.diary_publisher.images.illustrate('diary_publication', day, now, '书桌')
+    row = p.store.get('diary_publication', day)
+    assert row['image_file'] == original and row['status'] == '草稿'
     assert row['image_status'] == '生成失败'
     assert (Path(p.ctx.paths.data_dir) / original).exists()
-    p.diary.images.remove('diary', day)
+    p.diary_publisher.images.remove('diary_publication', day)
     assert not (Path(p.ctx.paths.data_dir) / original).exists()
 
 
@@ -93,10 +106,27 @@ async def test_generation_applies_image_limit_immediately(plugin, monkeypatch):
     service(p, monkeypatch)
     p.config.retention.image_count = 1
     await p.diary_publisher.prepare(day, now)
-    first = await p.diary.images.illustrate('diary', day, now, '窗边')
+    first = legacy_image(p, day)
     original = Path(p.ctx.paths.data_dir) / first['image_file']
     await p.diary_publisher.illustrate(day, now, '茶杯')
     assert not original.exists()
     assert 'image_file' not in p.store.get('diary', day)
     assert p.store.get('diary', day)['status'] == '已生成'
     assert p.store.get('diary_publication', day)['image_file']
+
+
+async def test_webui_space_image_actions_leave_diary_untouched(plugin, monkeypatch):
+    import asyncio
+    p = plugin
+    now, day = prepare(p)
+    service(p, monkeypatch)
+    private = legacy_image(p, day)
+    await p.diary_publisher.prepare(day, now)
+    job = await p.ui_diary_publish_action('image', day, image_prompt='桌上的茶杯')
+    await asyncio.gather(*list(p.jobs))
+    assert p.store.get('job', job['task_id'])['status'] == '已完成'
+    assert (await p.ui_diary_publication(day))['image']
+    await p.ui_diary_publish_action('remove_image', day)
+    assert not (await p.ui_diary_publication(day))['image']
+    assert p.store.get('diary', day) == private
+    assert (Path(p.ctx.paths.data_dir) / private['image_file']).exists()

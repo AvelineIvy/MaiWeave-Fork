@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 from ..integrations.chat_context import brief, dump
 from ..core.models import PlanInput
 from ..integrations.usage import generate
-from ..integrations.diary_images import DiaryImages
 
 
 class DiaryMoment(BaseModel):
@@ -43,7 +42,6 @@ class DiarySlot(BaseModel):
 class Diary:
     def __init__(self, engine, context, config):
         self.engine, self.ctx, self.config = engine, context, config
-        self.images = DiaryImages(engine, context, config)
         with engine.store.db:
             for record in engine.store.all("diary"):
                 if record["status"] == "生成中":

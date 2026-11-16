@@ -56,6 +56,18 @@ class ImageProbe(Probe):
             try: await p.show_life("send", event["id"], stream_id="other")
             except ValueError: pass
             else: raise AssertionError("聊天归属未校验")
+            if case == "revision":
+                self.result.update(stage="更正经历后重新生成图片")
+                p.engine.revise_experience(event["id"], {"形状": "心形折纸书签"}, "折好一枚心形书签，放在窗边木桌上", "实机更正形状验证", stream, p.now())
+                job = await p.show_life("send", event["id"], stream_id=stream)
+                assert "task_id" in job, job
+                await asyncio.gather(*list(p.jobs))
+                assert p.store.get("job", job["task_id"])["status"] == "已完成"
+                revised = p.store.get("experience_image", event["id"])
+                assert revised["image_file"] != original
+                assert "心形" in revised["content"] and "心形" in revised["image_prompt"]
+                self.result.update(status="已完成", result={"updated_prompt": revised["image_prompt"], "regenerated": True, "deliveries": len(p.store.all("image_delivery")), "folder": str(folder)})
+                return
             modes = []
             for mode in ("主动表达", "自然交流"):
                 self.result.update(stage=mode+"图文发送")

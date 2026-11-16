@@ -1,4 +1,4 @@
-"""按时间、数量和容量整理日记配图。"""
+"""按时间、数量和容量整理生活图片。"""
 from pathlib import Path
 from datetime import timedelta
 
@@ -31,7 +31,7 @@ class ImageRetention:
                 removed.add(path)
                 count -= 1
                 size -= sizes[path]
-        summary = dict(category="diary_images", label="日记、空间与聊天图片", total=len(files),
+        summary = dict(category="diary_images", label="生活图片（含已有日记图片）", total=len(files),
                        days=cfg.image_days, limit=cfg.image_count, protected=len(busy), remove=len(removed),
                        policy=f"{cfg.image_days} 天 / {cfg.image_max_mb} MiB，当前 {sum(sizes.values()) / 1024 / 1024:.1f} MiB")
         return removed, refs, summary

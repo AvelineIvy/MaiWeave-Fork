@@ -81,11 +81,11 @@ async def test_diary_stays_text_when_space_images_enabled(plugin, tmp_path):
     old_file.write_bytes(b"old")
     with plugin.store.db:
         plugin.store.put("diary", {"id": now.date().isoformat(), "status": "已生成", "content": "旧日记", "image_file": str(old_file)})
-    plugin.diary.images.illustrate = AsyncMock()
+    plugin.diary_publisher.images.illustrate = AsyncMock()
     plugin.ctx.llm.generate.side_effect = None
     plugin.ctx.llm.generate.return_value = {"success": True, "response": "今天过得很平静。"}
     row = await plugin.diary.write("", now)
     assert row["content"] == "今天过得很平静。"
-    plugin.diary.images.illustrate.assert_not_awaited()
+    plugin.diary_publisher.images.illustrate.assert_not_awaited()
     assert old_file.exists()
     assert row["image_file"] == str(old_file)

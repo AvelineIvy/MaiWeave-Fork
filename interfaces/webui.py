@@ -201,10 +201,9 @@ class WebUI:
         if action == "check":
             return self.start_job("检查空间连接", self.diary_publisher.check_connection())
         if action in {"image", "remove_image"}:
-            category = "diary_publication"
             if action == "remove_image":
-                return self.diary.images.remove(category, day)
-            return self.start_job("生成空间随笔配图", self.diary.images.illustrate(category, day, self.now(), image_prompt))
+                return self.diary_publisher.remove_image(day)
+            return self.start_job("生成空间随笔配图", self.diary_publisher.illustrate(day, self.now(), image_prompt))
         if action == "generate":
             return self.start_job("生成空间文案", self.diary_publisher.prepare(day, self.now()))
         if action == "save":

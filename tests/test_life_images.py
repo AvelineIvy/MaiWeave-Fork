@@ -90,3 +90,20 @@ async def test_requested_failure_notifies_original_chat_and_can_retry(plugin, mo
     assert p.ctx.send.image.await_count == 1
     assert p.ctx.send.text.await_count == 1
     assert p.life_images.context("chat-a")
+
+
+async def test_corrected_experience_regenerates_image(plugin, monkeypatch):
+    import asyncio
+    p = plugin
+    now, event = setup(p, monkeypatch)
+    await p.show_life("send", event["id"], stream_id="chat-a")
+    await asyncio.gather(*list(p.jobs))
+    original = p.store.get("experience_image", event["id"])["image_file"]
+    p.engine.revise_experience(event["id"], {"外形": "心形"}, "折好一个心形书签", "更正折纸形状", "chat-a", now)
+    p.ctx.llm.generate.return_value = {"success": True, "response": json.dumps({"content": "心形书签", "image_prompt": "木桌上的心形书签"})}
+    result = await p.show_life("send", event["id"], stream_id="chat-a")
+    await asyncio.gather(*list(p.jobs))
+    assert "task_id" in result
+    row = p.store.get("experience_image", event["id"])
+    assert row["image_file"] != original
+    assert "心形" in row["content"] and "心形" in row["image_prompt"]

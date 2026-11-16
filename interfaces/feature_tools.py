@@ -27,13 +27,13 @@ class FeatureTools:
             return {"enabled": self.config.diary.chat_images_enabled, "items": self.life_images.candidates(session)}
         if action != "send":
             raise ValueError("请选择查询或发送图片")
-        self.engine.owned("experience", experience_id, session)
+        event = self.engine.owned("experience", experience_id, session)
         if not self.config.diary.chat_images_enabled:
             raise ValueError("聊天图片已关闭")
         row = self.store.find("experience_image", experience_id) or {}
         if row.get("image_status") == "生成中":
             return {"status": "正在生成，请稍等"}
-        if row.get("image_file"):
+        if self.life_images.reusable(event, row):
             return await self.life_images.send(experience_id, session, self.now())
         if not self.config.diary.image_service_enabled:
             raise ValueError("生图服务已关闭")

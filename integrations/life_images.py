@@ -14,10 +14,17 @@ class LifeImages:
         self.store = engine.store
         self.images = DiaryImages(engine, ctx, config)
 
+    @staticmethod
+    def content(event):
+        return json.dumps(brief({key: event[key] for key in ("summary", "details", "source")}, 600, 6), ensure_ascii=False)
+
+    def reusable(self, event, image):
+        return bool(image.get("image_file") and image.get("content") == self.content(event))
+
     def candidates(self, session):
         rows = sorted(self.engine.experiences(session), key=lambda row: row["occurred_at"], reverse=True)[:10]
         return [{"id": row["id"], "summary": row["summary"][:200], "occurred_at": row["occurred_at"],
-                 "has_image": bool((self.store.find("experience_image", row["id"]) or {}).get("image_file"))} for row in rows]
+                 "has_image": self.reusable(row, self.store.find("experience_image", row["id"]) or {})} for row in rows]
 
     async def requested(self, experience_id, session, now):
         """追问图片的后台任务失败时，在原聊天告知结果。"""
@@ -36,9 +43,14 @@ class LifeImages:
             raise ValueError("聊天图片已关闭，可在模型设置的图片用途中开启")
         event = self.engine.owned("experience", experience_id, session)
         image = self.store.find("experience_image", experience_id)
+        content = self.content(event)
+        if image and image["content"] != content:
+            image = self.images.remove("experience_image", experience_id)
+            image["content"] = content
+            self.images.put("experience_image", image)
         if not image:
             image = {"id": experience_id, "status": "草稿", "session_id": event["session_id"],
-                     "content": json.dumps(brief({key: event[key] for key in ("summary", "details", "source")}, 600, 6), ensure_ascii=False)}
+                     "content": content}
             self.images.put("experience_image", image)
         if not image.get("image_file"):
             image = await self.images.illustrate("experience_image", experience_id, now)

@@ -1,4 +1,4 @@
-"""日记与空间随笔共用的图片生成、保存和用量记录。"""
+"""空间随笔与聊天共用的图片生成、保存和用量记录。"""
 
 import asyncio
 import base64
@@ -91,7 +91,7 @@ class DiaryImages:
         self.put(category, row)
         started = perf_counter()
         usage = {"id": uuid4().hex, "at": datetime.now(ZoneInfo(self.config.life.timezone)).isoformat(),
-                 "feature": "生活图片" if category == "experience_image" else "日记配图", "task": "images/generations", "model": config.image_model,
+                 "feature": "生活图片" if category == "experience_image" else "空间配图", "task": "images/generations", "model": config.image_model,
                  "status": "失败", "error": "", "prompt_tokens": None, "completion_tokens": None,
                  "total_tokens": None, "prompt_cache_hit_tokens": None}
         try:
