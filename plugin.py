@@ -615,6 +615,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
                                             message.get("processed_plain_text") or "", self.now())
                 self.presence.receive(message["session_id"], message.get("message_info", {}).get("user_info", {}).get("user_id", ""),
                                       message.get("processed_plain_text") or "", self.now())
+                await self.presence.observe_group(message, self.now())
             self.chat_context.wake_candidates.pop(message["session_id"], None)
             handled_wake = self.living.wake_for_message(message.get("processed_plain_text") or "", message["session_id"], self.now(),
                                          message.get("message_info", {}).get("user_info", {}).get("user_id", ""))

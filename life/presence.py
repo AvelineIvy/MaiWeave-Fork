@@ -1,6 +1,10 @@
 """按 MaiBot 人物身份保存近期陈述与后续活动。"""
 
 import re
+import json
+
+from ..core.models import ShareDecision
+from ..integrations.usage import generate
 from datetime import timedelta
 
 
@@ -80,3 +84,72 @@ class Presence:
                     self.engine.time(r["activity"][session]["at"]) > self.engine.time(r["said_at"]) and
                     now - self.engine.time(r["activity"][session]["at"]) < timedelta(minutes=30))}
                 for r in self.store.all("person_state") if r["id"] in people and self.engine.time(r["expires_at"]) > now]
+
+    async def observe_group(self, message, now):
+        """将同一人在群里的发言关联到尚未回复的主动私聊。"""
+        info = message.get("message_info", {})
+        text = (message.get("processed_plain_text") or "").strip()
+        if not info.get("group_info") or not text or text.startswith("/"):
+            return
+        if not self.living.config.proactive.enabled:
+            return
+        user = str(info.get("user_info", {}).get("user_id", ""))
+        streams = await self.living.ctx.chat.get_all_streams(platform="all_platforms")
+        for stream in streams:
+            if (stream.get("group_id") or stream.get("is_group_session")
+                    or str(stream.get("user_id", "")) != user or stream.get("platform") != message.get("platform")
+                    or (stream.get("account_id") and message.get("account_id") and stream["account_id"] != message["account_id"])):
+                continue
+            recent = self.living.receipts.context(stream["stream_id"], now)
+            if not recent:
+                continue
+            row = self.store.get("share_receipt", recent[0]["id"])
+            if (row.get("outcome") != "实际已发送" or row.get("followup", "waiting") != "waiting" or row.get("observed_at")
+                    or row.get("elsewhere") or row.get("record_id", "").startswith("elsewhere:")):
+                continue
+            row["elsewhere"] = {"session_id": message["session_id"], "user_id": user,
+                                "at": now.isoformat(), "text": text[:300], "status": "pending"}
+            with self.store.db:
+                self.store.put("share_receipt", row)
+
+    async def followup(self, session, now):
+        """沿用主动交流时机，在原私聊决定是否轻轻打趣一次。"""
+        recent = self.living.receipts.context(session, now)
+        if not recent:
+            return None
+        row = self.store.get("share_receipt", recent[0]["id"])
+        activity = row.get("elsewhere", {})
+        if (activity.get("status") != "pending" or row.get("observed_at")
+                or row.get("followup", "waiting") != "waiting"
+                or not timedelta() <= now - self.engine.time(activity["at"]) < timedelta(minutes=30)):
+            return None
+        recipient = await self.living.share_recipient(session, "")
+        history = await self.living.receipts.recent_chat(session)
+        group_history = await self.living.receipts.recent_chat(activity["session_id"])
+        guide = ("你主动私聊后，对方还没有在私聊回复，随后在共同群聊里说了话。判断现在是否适合回原私聊轻轻打趣一次。"
+                 "输出 JSON：send（是否开口）、reason（原因）。普通关系更倾向等待，亲近关系可以表达一点想念和轻松的小情绪。"
+                 "群里发言表示对方正在参与群聊；结合群消息内容，处理正事、求助或情绪低落时体谅对方。"
+                 "开口时围绕看到对方冒泡这一件事，语气轻松，给对方自由回复的空间。"
+                 f"当前时间：{now.isoformat()}。")
+        budget = self.living.config.context.private_chars
+        sections = [row.get("sent_text", row.get("topic", ""))[:600],
+                    json.dumps({"这次群里发言": activity["text"], "最近群聊": list(reversed(group_history))}, ensure_ascii=False),
+                    json.dumps(recipient, ensure_ascii=False),
+                    json.dumps(list(reversed(history)), ensure_ascii=False)]
+        labels = ["上次主动私聊：", "群里观察：", "彼此关系：", "最近私聊："]
+        size = max(0, (budget - len(guide) - sum(map(len, labels)) - 4) // 4)
+        prompt = guide + "\n".join(label + value[:size] for label, value in zip(labels, sections))
+        decision = await generate(self.living.ctx, self.store, self.living.config, "分享判断", prompt, ShareDecision)
+        row = self.store.get("share_receipt", row["id"])
+        if row.get("observed_at") or row.get("followup", "waiting") != "waiting":
+            return None
+        row["elsewhere"].update(status="noticed" if decision.send else "waiting", reason=decision.reason,
+                                decided_at=now.isoformat())
+        with self.store.db:
+            self.store.put("share_receipt", row)
+        if not decision.send:
+            return None
+        intent = ("回到当前私聊轻轻打趣：刚看到对方在共同群聊冒泡，之前主动私聊尚未收到回复。"
+                  "说一句自然、亲近程度合适的话，围绕看到对方出现这一件事。"
+                  f"本次判断：{decision.reason}。关系参考：{json.dumps(recipient, ensure_ascii=False)[:600]}。")
+        return ("elsewhere:" + row["id"], intent, None)

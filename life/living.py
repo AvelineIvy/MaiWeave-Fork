@@ -924,6 +924,10 @@ class Living:
                 notices.append(("greeting:" + greeting["key"], greeting["intent"], None))
             else:
                 greeting = None
+            if ordinary_hours and not notices:
+                followup = await self.presence.followup(session, now)
+                if followup:
+                    notices.append(followup)
             candidates, recipient = [], None
             if ordinary_hours and not notices and available:
                 try:
@@ -968,7 +972,7 @@ class Living:
             record_id = notices[0][0] if notices else event["id"]
             topic = "经历分享"
             if notices:
-                topics = {"anniversary": "纪念日", "reminder": "共同安排提醒", "confirmation": "安排确认",
+                topics = {"elsewhere": "群里遇见", "anniversary": "纪念日", "reminder": "共同安排提醒", "confirmation": "安排确认",
                           "thread": "话题跟进", "issue": "日程调整", "greeting": greeting["kind"] if greeting else "作息问候"}
                 topic = topics[record_id.split(":", 1)[0]]
                 score = f"本次处理{topic}"
