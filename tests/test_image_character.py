@@ -47,12 +47,15 @@ async def test_framing_card_changes_reuse_and_owner(plugin, monkeypatch):
     p.config.diary.image_character_enabled = True
     p.config.diary.image_character_appearance = "黑色齐肩发"
     p.ctx.llm.generate.return_value = {"success": True, "response": json.dumps({"content": "折纸", "image_prompt": "麦麦折书签", "character_visible": True})}
+    prompts = []
+    monkeypatch.setattr(type(p.diary_publisher.images), "request", lambda self, prompt: (prompts.append(prompt) or PNG, {}))
     job = await p.show_life("send", event["id"], framing="想看看你折纸的样子", stream_id="chat-a")
     await asyncio.gather(*list(p.jobs))
     assert p.store.get("job", job["task_id"])["status"] == "已完成"
     row = p.store.get("experience_image", event["id"])
     assert row["image_character_visible"] is True
     assert "想看看你折纸的样子" in p.ctx.llm.generate.call_args.args[0]
+    assert "本次用户的拍摄要求：想看看你折纸的样子" in prompts[-1]
     assert len(p.ctx.llm.generate.call_args.args[0]) < 6000
     count = p.ctx.llm.generate.await_count
     p.config.diary.image_character_appearance = "新发型"
@@ -251,7 +254,7 @@ async def test_lifestyle_preset_and_framing(plugin):
     assert state["style_preset"]["image_style"] == LIFE_IMAGE_STYLE
     assert len(LIFE_IMAGE_STYLE) <= 800
     assert "夜间" in LIFE_IMAGE_STYLE and "第一人称" in LIFE_IMAGE_STYLE
-    assert "前置镜头" in plugin.diary_publisher.images.instruction()
+    assert "前置摄像头" in plugin.diary_publisher.images.instruction()
     assert "旁观抓拍" in plugin.diary_publisher.images.instruction()
     await plugin.ui_save_character(json.dumps(state["style_preset"]))
     assert plugin.config.diary.chat_image_style == LIFE_IMAGE_STYLE

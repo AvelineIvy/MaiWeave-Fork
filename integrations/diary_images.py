@@ -75,7 +75,8 @@ class DiaryImages:
 
     def instruction(self):
         text = IMAGE_INSTRUCTION + (
-            "区分拍摄视角：明确要自拍时使用前置镜头，让人物看向镜头并结合当前活动；"
+            "画面描述负责主体、动作、场景和构图，画风由用户的风格设置统一提供。"
+            "区分拍摄视角：明确要自拍时，输出前置摄像头拍下的成片，观看者的位置就是镜头，手机与持机手处于取景范围之外；画面只露出另一只展示物件的手，人物看向镜头，采用近距离略广角和自然裁切；"
             "展示物件时使用第一人称近景或俯拍，主体是物件，手部仅在动作需要时出现；"
             "看做事的样子时可用旁观抓拍。优先遵循本次展示要求，场景、时段与物件沿用素材。")
         if self.config.diary.image_character_enabled:
@@ -317,6 +318,8 @@ class DiaryImages:
             style = config.chat_image_style if category == "experience_image" else config.image_style
             character = self.character_prompt(row.get("image_character_visible", False)) if category != "image_test" else ""
             full_prompt = prompt + ("\n" + character if character else "") + "\n画面风格：" + style
+            if row.get("image_request"):
+                full_prompt += "\n本次用户的拍摄要求：" + row["image_request"][:300]
             if config.image_negative_prompt.strip() and not self.separate_negative():
                 full_prompt += "\n负面提示词（画面中避免）：" + config.image_negative_prompt.strip()
             reference = ""
