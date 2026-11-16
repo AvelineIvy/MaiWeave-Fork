@@ -124,7 +124,7 @@ class DiaryConfig(PluginConfigBase):
     """模型会安排写日记的时间，写好的日记可在「日记与梦境」中查看，也可发布到 QQ 空间。"""
 
     __ui_label__ = "生活日记"
-    publish_mode: Literal["关闭", "手动发布", "日记完成后自动发布"] = setting("日记发空间", default="关闭", description="通过已连接的 SnowLuma 发布生活随笔和可选配图。自动模式在写日记日程结束后发布当天日记，每天一篇。")
+    publish_mode: Literal["关闭", "手动发布", "日记完成后自动发布"] = setting("日记发空间", default="关闭", description="通过已连接的 SnowLuma 或 NapCat 发布生活随笔和可选配图。自动模式在写日记日程结束后发布当天日记，每天一篇。")
     image_service_enabled: bool = setting("启用图片生成服务", default=False, description="开启后可生成空间随笔配图和聊天图片。")
     chat_images_enabled: bool = setting("聊天中展示生活图片", default=False, description="允许追问时发图，以及主动分享时由模型选择配图；同一经历复用已保存图片。")
     image_enabled: bool = setting("空间随笔自动配图", default=False, description="开启图片生成服务后，为新写好的空间随笔生成一张配图；关闭此项可在详情中手动生成。聊天配图由「聊天中展示生活图片」控制。")

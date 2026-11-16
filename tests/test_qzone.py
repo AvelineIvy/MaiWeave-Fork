@@ -90,7 +90,7 @@ async def test_off_mode_and_manual_mode_skip_automatic_publish(plugin):
 
 async def test_wrong_client_is_shown_before_publishing(plugin):
     p=plugin;now,day=prepare(p)
-    p.ctx.call_capability.return_value={'status':'ok','retcode':0,'data':{'app_name':'NapCat'}}
+    p.ctx.call_capability.return_value={'status':'ok','retcode':0,'data':{'app_name':'OtherClient'}}
     p.ctx.call_capability.side_effect=None
     await p.diary_publisher.prepare(day,now)
     with pytest.raises(ValueError,match='SnowLuma'):
@@ -226,3 +226,126 @@ async def test_changed_publication_clears_old_scene_without_image(plugin, image_
     saved = p.store.get("diary_publication", day)
     assert not any(key.startswith("image_") for key in saved)
     assert saved["content"] == "今天去了海边散步。"
+
+
+@pytest.mark.parametrize("client", ["SnowLuma", "NapCat"])
+@pytest.mark.parametrize("visibility,right", [("所有人", 1), ("好友", 4), ("仅自己", 64)])
+@pytest.mark.parametrize("with_image", [False, True])
+async def test_clients_publish_with_shared_records(plugin, monkeypatch, client, visibility, right, with_image):
+    from test_diary_images import service
+    p = plugin
+    now, day = prepare(p)
+    calls = []
+    from maiweave.integrations.qzone_web import QzoneWeb, UPLOAD_URL
+    http = []
+    def request(self, url, fields):
+        http.append((url, fields))
+        if url == UPLOAD_URL:
+            return {"ret": 0, "data": {"url": "https://example.com/image?bo=abc", "albumid": "a", "lloc": "l", "sloc": "s", "type": 1, "height": 576, "width": 768}}
+        return {"code": 0, "tid": "napcat-post"}
+    monkeypatch.setattr(QzoneWeb, "request", request)
+    async def call(capability, **kwargs):
+        calls.append(kwargs)
+        if kwargs["api_name"].endswith("get_version_info"):
+            return {"status": "ok", "retcode": 0, "data": {"app_name": client}}
+        if kwargs["api_name"] == "adapter.napcat.account.get_cookies":
+            assert kwargs["args"] == {"params": {"domain": "qzone.qq.com"}}
+            return {"status": "ok", "retcode": 0, "data": {"cookies": "p_skey=test; uin=o123456;"}}
+        return await adapter(capability, **kwargs)
+    p.ctx.call_capability.side_effect = call
+    p.config.diary.publish_visibility = visibility
+    p.diary_publisher.save(day, "今天的生活随笔", now)
+    if with_image:
+        service(p, monkeypatch)
+        await p.diary_publisher.illustrate(day, now, "窗边的茶杯")
+    result = await p.diary_publisher.publish(day, now)
+    assert result["client"] == client and result["account"] == "123456"
+    assert result["status"] == "已发布"
+    assert result["tid"] == ("napcat-post" if client == "NapCat" else "post1")
+    if client == "NapCat":
+        assert calls[-1]["api_name"] == "adapter.napcat.account.get_cookies"
+        fields = http[-1][1]
+        assert fields["ugc_right"] == right and fields["con"] == "今天的生活随笔"
+        assert ("richval" in fields) == with_image
+        if with_image:
+            assert fields["pic_bo"] == "abc"
+            assert fields["richval"] == ",a,l,s,1,576,768,,576,768"
+            assert http[0][1]["picfile"] and http[0][1]["base64"] == 1
+    else:
+        assert not http
+        assert calls[-1]["api_name"] == "adapter.snowluma.qzone.send_qzone_msg"
+        params = calls[-1]["args"]["params"]
+        assert params["ugc_right"] == right and params["content"] == "今天的生活随笔"
+        assert ("images" in params) == with_image
+        if with_image:
+            assert params["images"][0].startswith("base64://")
+    await p.diary_publisher.publish(day, now)
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("outcome", ["failure", "timeout", "upload_failure", "missing_tid", "cookie_failure", "invalid_response"])
+async def test_napcat_publish_failure_keeps_draft_image(plugin, monkeypatch, outcome):
+    from test_diary_images import service
+    p = plugin
+    now, day = prepare(p)
+    service(p, monkeypatch)
+    p.diary_publisher.save(day, "今天的随笔", now)
+    await p.diary_publisher.illustrate(day, now, "茶杯")
+    original = p.store.get("diary_publication", day)["image_file"]
+    async def call(capability, **kwargs):
+        if kwargs["api_name"].endswith("get_version_info"):
+            return {"status": "ok", "retcode": 0, "data": {"app_name": "NapCat"}}
+        if kwargs["api_name"] == "adapter.napcat.account.get_cookies":
+            if outcome == "cookie_failure":
+                return {"status": "failed", "retcode": 1}
+            return {"status": "ok", "retcode": 0, "data": {"cookies": "p_skey=test; uin=o123456;"}}
+        return await adapter(capability, **kwargs)
+    from maiweave.integrations.qzone_web import QzoneWeb, UPLOAD_URL
+    http = []
+    def request(self, url, fields):
+        http.append(url)
+        if url == UPLOAD_URL:
+            if outcome == "upload_failure":
+                return {"ret": 1, "msg": "上传失败"}
+            return {"ret": 0, "data": {"url": "https://example.com/image?bo=abc", "albumid": "a", "lloc": "l", "sloc": "s", "type": 1, "height": 576, "width": 768}}
+        if outcome == "timeout":
+            raise TimeoutError("请求超时")
+        if outcome == "invalid_response":
+            raise ValueError("空间响应不是 JSON")
+        return {"code": 0} if outcome == "missing_tid" else {"code": 1, "message": "发布被拒绝"}
+    monkeypatch.setattr(QzoneWeb, "request", request)
+    p.ctx.call_capability.side_effect = call
+    with pytest.raises((RuntimeError, TimeoutError, ValueError)):
+        await p.diary_publisher.publish(day, now)
+    row = p.store.get("diary_publication", day)
+    assert row["status"] == ("待核对" if outcome in {"timeout", "missing_tid", "invalid_response"} else "发布失败")
+    assert row["image_file"] == original and row["content"] == "今天的随笔"
+
+    if outcome == "cookie_failure":
+        assert not http
+    if outcome == "upload_failure":
+        assert http == [UPLOAD_URL]
+
+
+def test_qzone_web_form_and_cookie(monkeypatch):
+    import io
+    from urllib.parse import parse_qs, urlsplit
+    from maiweave.integrations import qzone_web
+    requests = []
+    def open_request(request, timeout):
+        requests.append(request)
+        assert timeout == 60
+        return io.BytesIO(b'callback({"code":0,"tid":"test"});')
+    monkeypatch.setattr(qzone_web, "urlopen", open_request)
+    web = qzone_web.QzoneWeb("123456", "uin=o123456; p_skey=abc==; skey=test;")
+    fields = web.prepare("窗边 & 茶杯 + 书", 64)
+    assert web.publish(fields)["tid"] == "test"
+    request = requests[0]
+    assert parse_qs(request.data.decode())["con"] == ["窗边 & 茶杯 + 书"]
+    assert parse_qs(request.data.decode())["ugc_right"] == ["64"]
+    assert "p_skey=abc==" in request.get_header("Cookie")
+    assert parse_qs(urlsplit(request.full_url).query)["uin"] == ["123456"]
+    with pytest.raises(ValueError, match="账号"):
+        qzone_web.QzoneWeb("123456", "uin=o654321; p_skey=test")
+    with pytest.raises(ValueError, match="p_skey"):
+        qzone_web.QzoneWeb("123456", "uin=o123456")

@@ -1,7 +1,8 @@
-"""把日记中的公开生活素材整理成随笔，通过 SnowLuma 发布到 QQ 空间。"""
+"""把日记中的公开生活素材整理成随笔，通过 QQ 适配器发布到 QQ 空间。"""
 
 import asyncio
 from pathlib import Path
+from .qzone_web import QzoneWeb
 from .diary_images import DiaryImages, IllustratedText, IMAGE_INSTRUCTION
 from ..life.diary import writing_material
 from .chat_context import dump, brief
@@ -16,7 +17,7 @@ class DiaryPublisher:
         self.engine, self.ctx, self.config = engine, context, config
         self.store = engine.store
         self.images = DiaryImages(engine, context, config)
-        self.connection = {"status": "尚未检查空间连接", "error": "", "account": ""}
+        self.connection = {"status": "尚未检查空间连接", "error": "", "account": "", "client": ""}
         with self.store.db:
             for row in self.store.all("diary_publication"):
                 if row["status"] in {"生成中", "发布中", "配图中"}:
@@ -37,18 +38,19 @@ class DiaryPublisher:
         return row
 
     async def check_connection(self):
-        self.connection.update(status="检查中", error="", account="")
+        self.connection.update(status="检查中", error="", account="", client="")
         try:
-            response = await self.ctx.call_capability("api.call", api_name="adapter.snowluma.system.get_version_info", version="1", timeout_ms=15000, args={})
+            response = await self.ctx.call_capability("api.call", api_name="adapter.napcat.system.get_version_info", version="1", timeout_ms=15000, args={})
             if response.get("status") != "ok" or response.get("retcode") != 0:
                 raise RuntimeError(response.get("error") or response.get("message") or response.get("wording") or "读取 QQ 客户端信息失败")
             app = response["data"].get("app_name", "")
-            if "snowluma" not in app.lower():
-                raise ValueError(f"当前客户端为 {app or '未知'}，日记发空间需要连接 SnowLuma")
-            account = await self.ctx.call_capability("api.call", api_name="adapter.snowluma.system.get_login_info", version="1", timeout_ms=15000, args={})
+            client = next((name for name in ("SnowLuma", "NapCat") if name.lower() in app.lower()), "")
+            if not client:
+                raise ValueError(f"当前客户端为 {app or '未知'}，空间发布需要 SnowLuma 或 NapCat")
+            account = await self.ctx.call_capability("api.call", api_name="adapter.napcat.system.get_login_info", version="1", timeout_ms=15000, args={})
             if not account or not account.get("user_id"):
-                raise ValueError("请先在 SnowLuma 登录 QQ")
-            self.connection.update(status="已连接 SnowLuma", account=str(account["user_id"]))
+                raise ValueError(f"请先在 {client} 登录 QQ")
+            self.connection.update(status=f"已连接 {client}", account=str(account["user_id"]), client=client)
         except Exception as error:
             self.connection.update(status="连接失败", error=str(error))
             raise
@@ -147,17 +149,35 @@ class DiaryPublisher:
         try:
             await self.check_connection()
             visibility = {"所有人": 1, "好友": 4, "仅自己": 64}[row["visibility"]]
-            params = {"content": row["content"], "ugc_right": visibility}
-            if row.get("image_file"):
-                params["images"] = ["base64://" + await asyncio.to_thread(self.images.encoded, row, 768)]
-            sent = True
-            result = await self.ctx.call_capability("api.call", api_name="adapter.snowluma.qzone.send_qzone_msg", version="1", timeout_ms=65000,
-                                                    args={"params": params})
-            if result.get("status") != "ok" or result.get("retcode") != 0:
-                sent = False
-                raise RuntimeError(result.get("error") or result.get("message") or result.get("wording") or "空间发布失败")
+            image = await asyncio.to_thread(self.images.encoded, row, 768) if row.get("image_file") else ""
+            if self.connection["client"] == "NapCat":
+                cookies = await self.ctx.call_capability("api.call", api_name="adapter.napcat.account.get_cookies",
+                    version="1", timeout_ms=15000, args={"params": {"domain": "qzone.qq.com"}})
+                if cookies.get("status") != "ok" or cookies.get("retcode") != 0:
+                    raise RuntimeError("获取空间登录信息失败")
+                web = QzoneWeb(self.connection["account"], cookies["data"]["cookies"])
+                fields = await asyncio.to_thread(web.prepare, row["content"], visibility, image)
+                sent = True
+                result = await asyncio.to_thread(web.publish, fields)
+                if result["code"] != 0:
+                    sent = False
+                    raise RuntimeError("空间发布失败：" + str(result.get("message") or result["code"]))
+                tid = str(result.get("tid") or "")
+                if not tid:
+                    raise RuntimeError("空间响应缺少说说 ID")
+            else:
+                params = {"content": row["content"], "ugc_right": visibility}
+                if image:
+                    params["images"] = ["base64://" + image]
+                sent = True
+                result = await self.ctx.call_capability("api.call", api_name="adapter.snowluma.qzone.send_qzone_msg",
+                    version="1", timeout_ms=65000, args={"params": params})
+                if result.get("status") != "ok" or result.get("retcode") != 0:
+                    sent = False
+                    raise RuntimeError(result.get("error") or result.get("message") or result.get("wording") or "空间发布失败")
+                tid = (result.get("data") or {}).get("tid", "")
             row.update(status="已发布", published_at=datetime.now(now.tzinfo).isoformat(),
-                       tid=(result.get("data") or {}).get("tid", ""), account=self.connection["account"])
+                       tid=tid, account=self.connection["account"], client=self.connection["client"])
         except asyncio.CancelledError:
             row.update(status="待核对" if sent else "发布失败", error="发布已中断，请查看 QQ 空间中的实际结果")
             raise

@@ -123,7 +123,7 @@ MaiWeave 让麦麦在聊天之外，也有自己的日程、兴趣和牵挂。�
 
 在 **日记与梦境 → 日记详情 → 日记发空间** 中生成和编辑文案。发布默认关闭，可选择手动发布，或随当天写日记日程完成后自动发布，每天一篇；可见范围支持好友、所有人和仅自己。
 
-需要 **MaiBot 统一 QQ 连接器与已登录的 SnowLuma**，沿用当前 QQ 登录。NapCat 的空间发布兼容性待验证。 [查看空间发布步骤 →](https://github.com/ilworkcn/MaiWeave/blob/main/docs/使用手册.md#日记发空间)
+需要 **MaiBot OneBot 适配器与已登录的 SnowLuma 或 NapCat**，沿用当前 QQ 登录。NapCat 通过适配器获取空间 Cookie，再上传配图、发布随笔。 [查看空间发布步骤 →](https://github.com/ilworkcn/MaiWeave/blob/main/docs/使用手册.md#日记发空间)
 
 ## 🏡 打开 WebUI，翻翻它的生活
 
