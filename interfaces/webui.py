@@ -5,6 +5,7 @@ import json
 import math
 from time import monotonic
 from datetime import date, timedelta
+from .review import Assessment
 
 from maibot_sdk import API
 
@@ -372,6 +373,7 @@ class WebUI:
         return await self.memory.edit_person(person_id, text)
 
     async def ui_save_profile(self, name: str, session_id: str, user_id: str = "", notes: str = "", profile_id: str = "", person_id: str = "", intimacy_mode: str = "auto", intimacy: int = 0, relationship: str = "普通关系") -> dict:
+        Assessment(conflicts=[], relationship=relationship)
         if intimacy_mode not in {"auto", "manual"} or intimacy not in {0, 1, 2, 3}:
             raise ValueError("请选择自动或手动关系，以及普通、熟悉、亲近或亲密等级")
         if person_id and not profile_id:

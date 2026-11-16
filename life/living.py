@@ -506,6 +506,7 @@ class Living:
         continuations = [r for r in engine.store.all("activity_memory") if r["next_action"] and r["id"] not in arranged
                          and r.get("kind") in {"study", "work", "leisure", "rest", "cook", "meal", "social"}
                          and (not r.get("next_date") or r["next_date"] <= now.date().isoformat())]
+        continuations = continuations[-12:]
         if config.schedule_enabled and in_hours(now.hour, config.sleep_hour, config.wake_hour):
             source = "日常作息"
             title, kind, location, motivation = "睡觉", "sleep", self.spatial.place("home")["name"], "按习惯休息，恢复精力"
@@ -551,7 +552,7 @@ class Living:
                 "时长按这次想完成的小事选择：随手收拾、坐一会儿可用10至20分钟；读一段、做一道菜按内容与空档安排。"
                 "疲惫或兴趣一般时选短一点，有具体兴致时可多留些时间。空闲也可以安静歇一会儿。"
                 f"此刻的习惯候选：{json.dumps(habit, ensure_ascii=False)}；目标下一步：{json.dumps(next_step, ensure_ascii=False)}；"
-                f"可接续的具体念头：{json.dumps(continuations[-12:], ensure_ascii=False)}。"
+                f"可接续的具体念头：{json.dumps(continuations, ensure_ascii=False)}。"
                 "选择接续时填写 continuation_id，并在活动里回应该念头；选择目标时填写 goal_id 和 goal_step_id。"
                 "接续可以换一种活动：做饭发现调料快用完，下次顺路买；散步看到想再去的店，合适时再逛。依据保存的具体经历安排，motivation说清这次与上次的联系。"
                 "已经安排在日程中的事按原安排进行。完成一件小事后，可以换个活动，也可以就此休息。"
@@ -559,6 +560,7 @@ class Living:
                 f"上次用餐结束：{last_meal}。过去两小时已读书 {reading_minutes} 分钟。到饭点可以安排做饭、用餐。"
                 f"人格：{json.dumps(personality, ensure_ascii=False)}；补充背景：{config.background}；"
                 f"兴趣：{config.interests}；状态：{json.dumps(state, ensure_ascii=False)}；"
+                "hunger 是饥饿程度，0表示不饿、100表示非常饿，数值越大越饿；达到65时这轮选择cook或meal，先解决用餐。"
                 f"聊天中确定的角色安排：{json.dumps(self.continuity.chat_arrangements(now), ensure_ascii=False)}；有效时段内按约定选择活动，blocked_kinds列出的类别留到该时段结束后。"
                 f"目标：{json.dumps(goals, ensure_ascii=False)}；最近经历：{json.dumps(recent, ensure_ascii=False)}"
                 f"；持续影响、偏好和接续内容：{json.dumps(self.continuity.context('', now), ensure_ascii=False)}"
@@ -581,6 +583,8 @@ class Living:
                 "根据仍在有效期内的天气选择活动，恶劣天气优先在室内休息或活动。"
             )
             def validate_activity(choice):
+                if state["hunger"] >= 65 and choice.kind not in {"cook", "meal"}:
+                    raise ValueError("当前饥饿程度已达到65，请选择吃饭meal或做饭cook；已有待吃饭菜时优先meal")
                 travel = self.spatial.route(state["location"], choice.location)["minutes"] if choice.location else 0
                 start = now + timedelta(minutes=travel)
                 end = start + timedelta(minutes=min(choice.minutes, free))

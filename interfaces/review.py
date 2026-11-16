@@ -3,15 +3,24 @@
 import json
 from uuid import uuid4
 from typing import Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from ..integrations.usage import generate
 
 
 class Assessment(BaseModel):
     conflicts: list[str]
-    relationship: str = "普通关系"
+    relationship: Literal["普通关系", "朋友", "好友", "家人", "恋人", "伴侣", "前任"] = "普通关系"
     level: Literal[0, 1, 2, 3] = 0
     reason: str = ""
+
+    @field_validator("conflicts", mode="before")
+    @classmethod
+    def conflict_texts(cls, value):
+        """把模型返回的分类冲突说明转成界面使用的文字。"""
+        if isinstance(value, list):
+            return [f"{item['type']}：{item['text']}" if isinstance(item, dict) and isinstance(item.get("type"), str)
+                    and isinstance(item.get("text"), str) else item for item in value]
+        return value
 
 
 class Reviews:
@@ -83,7 +92,9 @@ class Reviews:
                      "delete_anniversary": "删除范围是指定的一条生日或纪念日；个人资料与原生记忆继续保留。"}.get(record["action"], "")
             prompt = (
                 "核对拟写入的个人资料、日期或原生记忆与已有记录是否矛盾。输出 JSON：conflicts（具体冲突说明数组，兼容的补充填空数组）、"
-                "relationship（当前用户与角色的关系称呼）、level（0普通、1熟悉、2亲近、3亲密）、reason（判断依据）。"
+                "conflicts 的每项是字符串，例如[\"生日与已有记录不同\"]。"
+                "relationship 从普通关系、朋友、好友、家人、恋人、伴侣、前任中选一项，表示关系身份；"
+                "level（0普通、1熟悉、2亲近、3亲密）表示亲密程度，reason 为判断依据。"
                 "intimacy_mode 为 auto 时，根据已有画像与互动推断关系和等级；新增档案的姓名沿用所选画像。"
                 "比较同一人物、同一事件的日期、身份和事实。明确改正已有值也列出差异，交由用户确认。"
                 "区分公历农历、不同纪念日、转述和用户自己的信息。关系结合主体、时间和语境理解，"

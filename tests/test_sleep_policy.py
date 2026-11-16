@@ -24,7 +24,7 @@ async def test_all_day_mode_cancels_autonomous_sleep_and_does_not_reschedule(plu
     plugin.living.apply_schedule(now + timedelta(minutes=20))
     assert plugin.store.get("plan", plan["id"])["status"] == "cancelled"
     plugin.ctx.llm.generate.return_value = {"success": True, "response": json.dumps({
-        "title": "读书", "kind": "leisure", "minutes": 20, "location": "住处", "motivation": "继续阅读"})}
+        "title": "吃点东西", "kind": "meal", "minutes": 20, "location": "住处", "motivation": "先解决饥饿"})}
     await plugin.living.choose_activity(now + timedelta(minutes=21))
     assert all(p["kind"] != "sleep" for p in plugin.store.all("plan") if p["status"] in {"active", "scheduled"})
 
