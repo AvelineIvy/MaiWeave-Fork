@@ -57,6 +57,7 @@ class LifeImages:
                 image["image_request"] = framing[:300]
                 image.pop("image_prompt", None)
                 image.pop("image_character_visible", None)
+                image.pop("image_selfie", None)
                 self.images.put("experience_image", image)
             image = await self.images.illustrate("experience_image", experience_id, now)
         delivery = {"id": uuid4().hex, "at": now.isoformat(), "session_id": session,

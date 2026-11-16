@@ -34,66 +34,70 @@ class ImageProbe(Probe):
             p.config.life.enabled = True
             self.active = p
             now = p.now()
-            stream = "test-local-session"
-            import shutil
-            shutil.copy2(Path("/MaiMBot/data/plugins/ilworkcn.maiweave/character_reference.jpg"), folder / "character_reference.jpg")
+            stream = "test-private-session"
+            import base64
+            p.config.diary.image_reference_protocol = "Unsloth 原生"
+            p.config.diary.image_base_url = "https://images.example.com"
+            p.life_images.images.upload_reference(base64.b64encode((Path(__file__).parent / "reference.jpg").read_bytes()).decode())
             p.config.diary.image_character_reference_enabled = True
             p.config.diary.image_character_enabled = True
-            p.config.diary.image_character_appearance = "成年女性，黑色齐肩发，棕色眼睛"
+            p.config.diary.image_character_appearance = "成年女性，棕色长发，琥珀色眼睛"
             p.config.diary.image_character_clothing = "米白色针织衫"
-            cls = type(p.diary_publisher.images)
-            original_request = cls.request
-            prompts = []
-            references = []
-            def capture(images, prompt, reference=""):
-                prompts.append(prompt)
-                references.append(bool(reference))
-                return original_request(images, prompt, reference)
-            cls.request = capture
             checks = []
-            for summary, framing, visible in [
-                ("折好一枚三角书角书签，放在窗边的木桌上", "只看书签特写", False),
-                ("在窗边坐着折一枚三角书签，双手正在压平折痕", "想看看麦麦本人折纸的样子，人物入镜", True),
-            ]:
-                self.result.update(stage=framing)
-                event = p.engine.record_experience(ExperienceInput(summary=summary, source="simulated", occurred_at=now.isoformat(), evidence="角色卡实机验证"), stream, now)
-                job = await p.show_life("send", event["id"], framing=framing, stream_id=stream)
-                await asyncio.gather(*list(p.jobs))
-                assert p.store.get("job", job["task_id"])["status"] == "已完成", p.store.get("job", job["task_id"])
-                row = p.store.get("experience_image", event["id"])
-                assert row["image_character_visible"] == visible, row
-                assert references[-1] == visible
-                if visible: assert "人物外貌以参考图为准" in prompts[-1]
-                assert ("黑色齐肩发" in prompts[-1]) == visible, prompts[-1]
-                checks.append({"scene":framing,"visible":row["image_character_visible"],"prompt":prompts[-1],"file":row["image_file"]})
-            original_file = row["image_file"]
-            count = len(p.store.all("model_usage"))
-            p.config.diary.image_character_appearance = "成年女性，棕色长发，绿色眼睛"
+            self.result.update(checks=checks, folder=str(folder))
+            summary = "刚做好一只白色钩织小兔子，给它围上粉色围巾，在窗边举着它留了一张自己的自拍"
+            event = p.engine.record_experience(ExperienceInput(summary=summary, source="simulated", occurred_at=now.isoformat(), evidence="图片实机测试"), stream, now)
+            self.result.update(stage="聊天追问：参考图自拍并发送 QQ")
+            job = await p.show_life("send", event["id"], framing="想看看你和兔子一起的前置自拍", stream_id=stream)
+            await asyncio.gather(*list(p.jobs))
+            assert p.store.get("job", job["task_id"])["status"] == "已完成", p.store.get("job", job["task_id"])
+            row = p.store.get("experience_image", event["id"])
+            assert row["image_character_visible"] and row["image_selfie"], row
+            checks.append({"case":"聊天追问", "image":row["image_file"], "delivery":p.store.all("image_delivery")[-1]})
+            old_file = row["image_file"]
             await p.show_life("send", event["id"], stream_id=stream)
-            assert p.store.get("experience_image", event["id"])["image_file"] == original_file
-            assert len(p.store.all("model_usage")) == count
-            try: await p.show_life("send", event["id"], stream_id="other")
-            except ValueError: pass
-            else: raise AssertionError("聊天归属校验失败")
-            self.result.update(stage="空间自动配图共用角色卡")
-            day = now.date().isoformat()
+            assert p.store.get("experience_image", event["id"])["image_file"] == old_file
+            checks.append({"case":"追问复用", "delivery":p.store.all("image_delivery")[-1]})
+            for mode, detail in [("主动表达", "窗边举着刚折好的三角书签自拍，想展示纸上的小猫图案"), ("自然交流", "坐在手作桌旁举着刚做好的白色小兔子自拍，粉色围巾终于系好了")]:
+                self.result.update(stage=mode+"：真实文字发送后配图")
+                p.config.proactive.mode = mode
+                now = p.now()
+                event = p.engine.record_experience(ExperienceInput(summary=detail, source="simulated", occurred_at=now.isoformat(), evidence="图片实机测试"), stream, now)
+                receipt = {"session":stream, "mode":mode, "record_id":event["id"], "experience_id":event["id"], "topic":detail, "notice":False, "image_requested":True}
+                intent = "这是用户要求的 QQ 图片联调测试。请用一句自然的短话分享这件事："+detail+"。图片由插件随后发送，正文只需说这件事。"
+                if mode == "主动表达":
+                    await p.living.receipts.express(stream, intent, receipt, now)
+                    receipt = p.store.all("share_receipt")[-1]
+                else:
+                    result = await native.maisaka.proactive.trigger(stream, intent, reason="用户要求的配图实机测试", metadata={"maiweave_record_id":event["id"]})
+                    assert result["success"], result
+                    p.living.receipts.accept(result["task_id"], receipt, now)
+                    for _ in range(90):
+                        await asyncio.sleep(2)
+                        await p.living.receipts.refresh(p.now())
+                        receipt = p.store.get("share_receipt", result["task_id"])
+                        if receipt["outcome"] != "MaiBot 已受理": break
+                assert receipt["outcome"] == "实际已发送", receipt
+                before = len(p.living.receipts.sent_times(stream, now.tzinfo))
+                await p.living.share_images(p.now())
+                await p.living.share_images(p.now())
+                receipt = p.store.get("share_receipt", receipt["id"])
+                assert receipt["image_delivery"] == "已发送", receipt
+                assert len(p.living.receipts.sent_times(stream, now.tzinfo)) == before
+                checks.append({"case":mode,"receipt":receipt,"image":p.store.get("experience_image",event["id"])["image_file"]})
+            self.result.update(stage="空间随笔：参考图自动配图")
+            day = p.now().date().isoformat()
             with p.store.db:
-                p.store.put("diary", {"id":day,"status":"已生成","material":{"经历":[{"summary":"今天在窗边折纸，给自己留了一张双手捧着折好书签的人物画面。", "source":"simulated","session_id":""}]}})
+                p.store.put("diary", {"id":day,"status":"已生成","material":{"经历":[{"summary":"今天做了白色兔子手作，系好粉色围巾，我在窗边拿着它拍了张前置自拍，想把这张自己的自拍放进空间随笔。", "source":"simulated","session_id":""}]}})
             p.config.diary.image_enabled = True
-            row = await p.diary_publisher.prepare(day, now)
-            assert row["image_status"] == "已生成", row
-            usage = p.store.all("model_usage")[count:]
-            assert len([r for r in usage if r["task"] not in {"images/generations", "images/edits"}]) == 1, usage
-            if row["image_character_visible"]:
-                assert "棕色长发" in prompts[-1], prompts[-1]
-            checks.append({"scene":"空间自动配图", "visible":row["image_character_visible"],"prompt":prompts[-1],"file":row["image_file"]})
-            assert len(p.store.all("image_delivery")) == 3
-            self.result.update(status="已完成", result={"checks":checks,"reuse":True,"ownership":True,"deliveries":3,"references":references,"folder":str(folder)})
+            row = await p.diary_publisher.prepare(day, p.now())
+            assert row["image_status"] == "已生成" and row["image_character_visible"], row
+            checks.append({"case":"空间自动配图", "image":row["image_file"],"selfie":row.get("image_selfie"),"status":row["status"]})
+            self.result.update(status="已完成", usage=[{"feature":r["feature"],"task":r["task"],"status":r["status"]} for r in p.store.all("model_usage")], deliveries=len(p.store.all("image_delivery")))
         except Exception as error:
             self.result.update(status="失败",error=str(error))
             self.ctx.logger.exception("生活图片实机测试失败")
         finally:
-            if "original_request" in locals(): cls.request = original_request
             self.active=None
             await p.on_unload()
 

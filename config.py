@@ -120,7 +120,7 @@ class ContinuityConfig(PluginConfigBase):
     followup_hours: int = setting("未完成事项跟进间隔（小时）", default=24, ge=1, description="关系中的未解决事项进入一次性跟进队列")
 
 
-LIFE_IMAGE_STYLE = '精致的日系二维动画生活插画。人物采用清晰柔和的动漫五官：通透有层次的眼睛，简洁的小鼻子与嘴部线条，平滑的肤色色块和自然淡粉腮红；脸部轮廓轻盈，表情亲近生动。线稿细而干净，头发以柔顺的成组发束和柔和高光表现，衣物与食物用干净色块、细腻渐变和适量细节表现材质。背景同样是精细的二维动画场景，整体统一为手绘插画。色彩清透柔和，奶油白、浅暖棕与自然绿相互映衬，白色保持干净；日间采用柔和自然光与明确的暖色投影，夜间采用柔和灯光，保留亮部与阴影层次。自拍呈现前置摄像头拍下的成片，观看者的位置就是镜头。手机本体与持机手在取景范围之外，持机侧肩膀靠近镜头；画面中只露出另一只用于展示物件的手。镜头距脸较近、略高于视线，人物看向镜头，采用轻微广角透视、自然裁切和略倾斜构图，像亲手拍给熟人的照片。拍摄食物或手作物时，以第一人称近景或斜俯拍突出物件和周围生活细节，手部按本次动作入镜；旁观抓拍按本次要求构图。人物外貌以角色卡或参考图为准，具体时段、场景、穿着和物件来自本次生活内容。'
+LIFE_IMAGE_STYLE = '精致的日系二维生活插画，纤细干净的线稿，柔和赛璐璐色块与少量渐变。人物采用清透的动漫眼睛、简化的小鼻子和嘴型、轻柔面部阴影与淡粉腮红，自然微笑；头发以成组发束和柔和高光表现。衣物、食物和背景统一为细腻手绘质感。奶油白、浅暖棕与自然绿配色，白色清透，光线随时段变化：白天柔和自然光，夜间温暖灯光。外貌沿用角色卡或参考图，场景细节取自本次生活。'
 
 
 class DiaryConfig(PluginConfigBase):
@@ -135,13 +135,13 @@ class DiaryConfig(PluginConfigBase):
     image_api_key: str = setting("生图 API Key（生图必填）", default="", description="填写图片生成服务提供的密钥。", json_schema_extra={"x-widget": "password", "input_type": "password"})
     image_model: str = setting("生图模型（生图必填）", default="gpt-image-1", description="填写服务实际支持的图片生成模型名称。每次生成一张横向 4:3、1024×768 图片。保存后可点击配置页顶部「测试生图配置」验证。")
     image_character_enabled: bool = setting("启用麦麦角色卡", default=False, description="空间和聊天共用一张角色卡，由提示词模型结合场景决定麦麦是否入镜。")
-    image_reference_protocol: Literal["OpenAI 图片编辑", "通义千问兼容接口", "OpenAI Chat 生图", "Gemini 原生", "DashScope 多模态"] = setting("图片接口格式", default="OpenAI 图片编辑", description="按服务选择请求格式。OpenAI 与通义兼容地址通常包含 /v1；Gemini、DashScope 填服务根地址。DashScope 使用同步多模态生图接口。")
+    image_reference_protocol: Literal["OpenAI 图片编辑", "通义千问兼容接口", "OpenAI Chat 生图", "Gemini 原生", "DashScope 多模态", "Unsloth 原生"] = setting("图片接口格式", default="OpenAI 图片编辑", description="按服务选择请求格式。OpenAI 与通义兼容地址通常包含 /v1；Gemini、DashScope、Unsloth 填服务根地址。Unsloth 使用服务中已加载的图片模型。DashScope 使用同步多模态生图接口。")
     image_character_reference_enabled: bool = setting("使用角色参考图", default=False, description="麦麦入镜时优先参考图片中的外貌，文字角色卡补充细节。请在「角色与图片」页面上传图片，并选择服务支持的参考图接口。")
     image_character_reference_url: str = setting("参考图片地址（选填）", default="", description="也可填写 PNG、JPEG 或 WebP 的 HTTP(S) 直链。已上传的参考图优先使用；空间和聊天共用，已有图片继续复用。", max_length=2000)
     image_character_appearance: str = setting("外貌设定（选填）", default="", description="填写发型、发色、眼睛和体型等稳定特征，例如：黑色齐肩发、棕色眼睛。可结合参考图使用。", max_length=800)
     image_character_clothing: str = setting("常用穿着（选填）", default="", description="填写常穿的服饰和偏好，例如：米白色针织衫。实际穿着会结合活动场景调整。已有图片继续复用，修改后用于新图。", max_length=400)
     image_style: str = setting("空间随笔与测试风格（选填）", default=LIFE_IMAGE_STYLE, description="用于空间随笔配图和「测试生图配置」，默认采用细腻柔和的二维日常插画；人物有自然随拍感，物件与风景沿用本次场景。", max_length=800)
-    image_negative_prompt: str = setting("负面提示词（选填）", default='不要写实照片风，不要真实皮肤纹理，不要毛孔，不要 3D 渲染，不要 CGI，不要塑料娃娃感，不要素描排线，不要粗糙纸纹，不要密集噪点，不要厚涂油画感，不要整幅泛黄或棕褐色滤镜，不要商业海报构图，不要角色立绘感，不要风格漂移，不要畸形手指，不要多余手指，不要文字水印。', description="空间、聊天与生图测试共用，填写希望避免的画风和画面问题；留空关闭。会与画面描述一起提交给图片生成服务。", max_length=800)
+    image_negative_prompt: str = setting("负面提示词（选填）", default='欧美漫画风，迪士尼式三维动画质感，粗黑轮廓线，夸张下颌，深刻面部阴影，夸张露齿笑，写实皮肤与毛孔，塑料质感，素描排线，粗糙纸纹，密集噪点，厚涂油画，整幅泛黄滤镜，商业海报构图，畸形或多余肢体，文字水印。', description="空间、聊天与生图测试共用，填写希望避免的画风和画面问题；留空关闭。会与画面描述一起提交给图片生成服务。", max_length=800)
     chat_image_style: str = setting("聊天图片风格（选填）", default=LIFE_IMAGE_STYLE, description="用于聊天追问发图和主动分享配图，默认采用细腻柔和的二维日常插画；人物有自然随拍感，同一经历已有图片继续复用，新风格用于后续生成。", max_length=800)
     publish_visibility: Literal["所有人", "好友", "仅自己"] = setting("空间可见范围", default="好友", description="生成文案后可在日记详情预览、编辑和发布。")
     enabled: bool = setting("自动写日记", default=True, description="由生活规划模型安排写日记的时间，进入活动窗口后回顾当天生活")

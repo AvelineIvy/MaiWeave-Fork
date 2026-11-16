@@ -73,3 +73,29 @@ async def test_qwen21_negative_prompt_in_text(plugin, monkeypatch):
     monkeypatch.setattr(diary_images, "urlopen", respond)
     with pytest.raises(ValueError, match="test error"):
         images.request("窗边")
+
+
+@pytest.mark.parametrize("reference", [False, True])
+async def test_unsloth_reference_and_authenticated_download(plugin, monkeypatch, reference):
+    images = plugin.diary_publisher.images
+    cfg = plugin.config.diary
+    cfg.image_reference_protocol = "Unsloth 原生"
+    cfg.image_base_url = "http://localhost:8888"
+    cfg.image_api_key = "test-key"
+    images.upload_reference(base64.b64encode(PNG).decode())
+    calls = []
+    def respond(request, timeout):
+        calls.append(request)
+        assert request.get_header("Authorization") == "Bearer test-key"
+        if request.full_url.endswith("/file"):
+            assert request.full_url.endswith("/gallery/generated-image/file")
+            return io.BytesIO(PNG)
+        assert request.full_url.endswith("/api/inference/images/generate")
+        payload = json.loads(request.data)
+        assert (payload["width"], payload["height"]) == (1024, 768)
+        assert (payload.get("workflow") == "reference") == reference
+        assert ("init_image" in payload) == reference
+        return io.BytesIO(b'{"images":[{"id":"generated-image"}]}')
+    monkeypatch.setattr(diary_images, "urlopen", respond)
+    assert images.request("窗边", images.reference_path if reference else "") == (PNG, {})
+    assert len(calls) == 2

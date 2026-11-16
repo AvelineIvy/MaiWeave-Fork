@@ -28,6 +28,10 @@ class IllustratedText(BaseModel):
     content: str = Field(min_length=1)
     image_prompt: str = Field(min_length=1, max_length=1200)
     character_visible: bool = False
+    selfie: bool = False
+
+
+SELFIE_COMPOSITION = "前置自拍成片：观看者的位置就是镜头，镜头距脸较近并略高于视线，人物看向镜头，轻微广角、自然裁切与略倾斜构图。持机侧肩膀靠近镜头，设备和持机手处于画外，另一只手可展示物件。"
 
 
 CHARACTER_FIELDS = ("image_character_enabled", "image_character_reference_enabled", "image_character_reference_url",
@@ -75,10 +79,10 @@ class DiaryImages:
 
     def instruction(self):
         text = IMAGE_INSTRUCTION + (
-            "画面描述负责主体、动作、场景和构图，画风由用户的风格设置统一提供。"
-            "区分拍摄视角：明确要自拍时，输出前置摄像头拍下的成片，观看者的位置就是镜头，手机与持机手处于取景范围之外；画面只露出另一只展示物件的手，人物看向镜头，采用近距离略广角和自然裁切；"
-            "展示物件时使用第一人称近景或俯拍，主体是物件，手部仅在动作需要时出现；"
-            "看做事的样子时可用旁观抓拍。优先遵循本次展示要求，场景、时段与物件沿用素材。")
+            "同时输出 selfie 布尔值：用户要求前置自拍、或本次画面选用前置自拍时为 true，"
+            "物件随手拍、旁观抓拍和对镜拍照为 false。画面描述只安排主体、动作、场景和视角，画风由用户设置提供。"
+            "自拍时单手持机、另一只手展示物件；物件随手拍采用第一人称近景或俯拍；看做事的样子可用旁观抓拍。"
+            "沿用本次用户的拍摄要求，场景与时段取自素材。")
         if self.config.diary.image_character_enabled:
             text += ("同时输出 character_visible 布尔值：画面包含麦麦本人时为 true，物件或风景特写为 false。"
                      "根据本次展示要求和生活素材选择构图：看书签、饭菜等物件时聚焦物件；"
@@ -179,6 +183,8 @@ class DiaryImages:
 
     def request_endpoint(self, reference=False):
         protocol = self.config.diary.image_reference_protocol
+        if protocol == "Unsloth 原生":
+            return "/api/inference/images/generate"
         if protocol == "OpenAI Chat 生图":
             return "/chat/completions"
         if protocol == "Gemini 原生":
@@ -220,7 +226,12 @@ class DiaryImages:
                 content_type = "multipart/form-data; boundary=" + boundary
         headers = {"Authorization": "Bearer " + config.image_api_key, "Content-Type": content_type}
         protocol = config.image_reference_protocol
-        if protocol == "OpenAI Chat 生图":
+        if protocol == "Unsloth 原生":
+            payload = {"prompt": prompt, "width": 1024, "height": 768, "batch_size": 1}
+            if reference_data:
+                payload.update(workflow="reference", init_image="data:image/png;base64," + reference_data)
+            data = json.dumps(payload).encode()
+        elif protocol == "OpenAI Chat 生图":
             content = [{"type": "text", "text": "请生成一张 4:3 横向图片。" + prompt}]
             if reference_data:
                 content.append({"type": "image_url", "image_url": {"url": "data:image/png;base64," + reference_data}})
@@ -249,6 +260,12 @@ class DiaryImages:
         except HTTPError as error:
             raise RuntimeError(f"图片生成服务 {endpoint} 返回 HTTP {error.code}：{error.read().decode('utf-8', errors='replace')[:1000]}") from error
         tokens = result.get("usage", {})
+        if protocol == "Unsloth 原生":
+            image_id = result["images"][0]["id"]
+            download = Request(config.image_base_url.rstrip('/') + f"/api/inference/images/gallery/{image_id}/file",
+                               headers={"Authorization": "Bearer " + config.image_api_key})
+            with urlopen(download, timeout=self.download_timeout) as response:
+                return response.read(), tokens
         if protocol == "Gemini 原生":
             parts = result.get("candidates", [{}])[0].get("content", {}).get("parts", [])
             item = next(({"b64_json": part["inlineData"]["data"]} for part in parts if "inlineData" in part), {})
@@ -289,6 +306,8 @@ class DiaryImages:
         if not all(value.strip() for value in (config.image_base_url, config.image_api_key, config.image_model)):
             raise ValueError("请在模型设置的图片生成服务中填写生图接口地址、API Key 和模型")
         supplied_prompt = prompt.strip()
+        if supplied_prompt:
+            row.pop("image_selfie", None)
         prompt = supplied_prompt or row.get("image_prompt", "")
         if len(prompt) > 1200:
             raise ValueError("画面描述请控制在1200字以内")
@@ -310,14 +329,17 @@ class DiaryImages:
                     instructions += "\n本次展示要求：" + row["image_request"][:300]
                 idea = await generate(self.ctx, self.store, self.config, "配图提示词", instructions, IllustratedText)
                 prompt = prompt or idea.image_prompt
+                row["image_selfie"] = idea.selfie
                 if config.image_character_enabled:
-                    row["image_character_visible"] = idea.character_visible
+                    row["image_character_visible"] = idea.character_visible or idea.selfie
                 else:
                     row.pop("image_character_visible", None)
             row["image_prompt"] = prompt
             style = config.chat_image_style if category == "experience_image" else config.image_style
             character = self.character_prompt(row.get("image_character_visible", False)) if category != "image_test" else ""
             full_prompt = prompt + ("\n" + character if character else "") + "\n画面风格：" + style
+            if category != "image_test" and row.get("image_selfie"):
+                full_prompt += "\n拍摄构图：" + SELFIE_COMPOSITION
             if row.get("image_request"):
                 full_prompt += "\n本次用户的拍摄要求：" + row["image_request"][:300]
             if config.image_negative_prompt.strip() and not self.separate_negative():

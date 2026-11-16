@@ -253,8 +253,8 @@ async def test_lifestyle_preset_and_framing(plugin):
     assert state["style_preset"]["chat_image_style"] == LIFE_IMAGE_STYLE
     assert state["style_preset"]["image_style"] == LIFE_IMAGE_STYLE
     assert len(LIFE_IMAGE_STYLE) <= 800
-    assert "夜间" in LIFE_IMAGE_STYLE and "第一人称" in LIFE_IMAGE_STYLE
-    assert "前置摄像头" in plugin.diary_publisher.images.instruction()
+    assert "夜间" in LIFE_IMAGE_STYLE and "自拍" not in LIFE_IMAGE_STYLE
+    assert "前置自拍" in plugin.diary_publisher.images.instruction()
     assert "旁观抓拍" in plugin.diary_publisher.images.instruction()
     await plugin.ui_save_character(json.dumps(state["style_preset"]))
     assert plugin.config.diary.chat_image_style == LIFE_IMAGE_STYLE
@@ -276,3 +276,91 @@ async def test_image_use_follows_plugin_config(plugin):
     assert set(fields) == {"chat_images_enabled", "image_enabled"}
     with pytest.raises(ValueError):
         await p.ui_save_character(json.dumps({"image_enabled": True}))
+
+
+@pytest.mark.parametrize("selfie", [True, False])
+async def test_selfie_composition_only_for_selfie(plugin, monkeypatch, selfie):
+    from maiweave.integrations.diary_images import SELFIE_COMPOSITION
+    p = plugin
+    now, event = setup(p, monkeypatch)
+    prompts = []
+    monkeypatch.setattr(type(p.diary_publisher.images), "request", lambda self, prompt: (prompts.append(prompt) or PNG, {}))
+    p.ctx.llm.generate.return_value = {"success": True, "response": json.dumps({"content": "手作", "image_prompt": "桌旁展示兔子", "selfie": selfie})}
+    await p.life_images.send(event["id"], "chat-a", now, framing="展示手作")
+    assert (SELFIE_COMPOSITION in prompts[-1]) == selfie
+    assert p.store.get("experience_image", event["id"])["image_selfie"] == selfie
+    assert p.ctx.llm.generate.await_count == 1
+
+
+async def test_manual_scene_drops_previous_selfie(plugin, monkeypatch):
+    from maiweave.integrations.diary_images import SELFIE_COMPOSITION
+    p = plugin
+    now, day = prepare(p)
+    service(p, monkeypatch)
+    p.config.diary.image_character_enabled = False
+    p.diary_publisher.images.put("diary_publication", {"id": day, "status": "草稿", "content": "手作", "image_selfie": True})
+    prompts = []
+    monkeypatch.setattr(type(p.diary_publisher.images), "request", lambda self, prompt: (prompts.append(prompt) or PNG, {}))
+    await p.diary_publisher.illustrate(day, now, "桌面上兔子的特写")
+    assert SELFIE_COMPOSITION not in prompts[-1]
+
+
+@pytest.mark.parametrize("entry", ["追问", "自然交流", "主动表达", "空间"])
+async def test_selfie_uses_reference_across_entries(plugin, monkeypatch, entry):
+    p = plugin
+    now, event = setup(p, monkeypatch)
+    cfg = p.config.diary
+    cfg.image_character_enabled = True
+    cfg.image_character_reference_enabled = True
+    cfg.image_character_reference_url = "https://example.com/character.png"
+    cfg.image_character_appearance = "黑色齐肩发"
+    captured = []
+    monkeypatch.setattr(type(p.diary_publisher.images), "request", lambda self, prompt, reference="": (captured.append((prompt, reference)) or PNG, {}))
+    answer = {"success": True, "response": json.dumps({"content": "展示手作", "image_prompt": "麦麦拿着兔子自拍", "selfie": True, "character_visible": False})}
+    if entry == "空间":
+        now, day = prepare(p)
+        cfg.image_enabled = True
+        p.ctx.llm.generate.return_value = answer
+        row = await p.diary_publisher.prepare(day, now)
+    else:
+        p.ctx.llm.generate.return_value = answer
+        if entry == "追问":
+            await p.life_images.requested(event["id"], "chat-a", now, framing="发张自拍")
+        else:
+            receipt = {"id": "selfie-share", "session": "chat-a", "created": now.isoformat(), "mode": entry,
+                       "outcome": "实际已发送", "sent_at": now.isoformat(), "experience_id": event["id"], "image_requested": True}
+            with p.store.db:
+                p.store.put("share_receipt", receipt)
+            await p.living.share_images(now)
+            await p.living.share_images(now)
+            assert p.store.get("share_receipt", receipt["id"])["image_delivery"] == "已发送"
+            assert len(p.living.receipts.sent_times("chat-a", now.tzinfo)) == 1
+        row = p.store.get("experience_image", event["id"])
+        assert p.ctx.send.image.await_count == 1
+        assert p.life_images.context("chat-a")[-1]["experience_id"] == event["id"]
+    assert row["image_character_visible"] is True
+    assert len(captured) == 1 and captured[0][1] == cfg.image_character_reference_url
+    assert "黑色齐肩发" in captured[0][0] and "拍摄构图：" in captured[0][0]
+    assert p.ctx.llm.generate.await_count == 1
+
+
+async def test_failed_selfie_retry_changes_to_object(plugin, monkeypatch):
+    p = plugin
+    now, event = setup(p, monkeypatch)
+    p.config.diary.image_character_enabled = True
+    p.config.diary.image_character_reference_enabled = True
+    p.config.diary.image_character_reference_url = "https://example.com/character.png"
+    p.ctx.llm.generate.return_value = {"success": True, "response": json.dumps({"content": "手作", "image_prompt": "展示兔子自拍", "selfie": True})}
+    def fail(prompt, reference=""):
+        raise TimeoutError("生图超时")
+    monkeypatch.setattr(p.life_images.images, "request", fail)
+    with pytest.raises(TimeoutError):
+        await p.life_images.send(event["id"], "chat-a", now, framing="自拍")
+    p.ctx.llm.generate.return_value = {"success": True, "response": json.dumps({"content": "手作", "image_prompt": "桌面兔子特写", "selfie": False, "character_visible": False})}
+    captured = []
+    monkeypatch.setattr(p.life_images.images, "request", lambda prompt, reference="": (captured.append((prompt, reference)) or PNG, {}))
+    await p.life_images.send(event["id"], "chat-a", now, framing="只看桌面的兔子")
+    assert captured[0][1] == "" and "拍摄构图：" not in captured[0][0]
+    assert "只看桌面的兔子" in captured[0][0]
+    assert p.ctx.send.image.await_count == 1
+    assert len(p.store.all("image_delivery")) == 1
