@@ -125,13 +125,14 @@ class DiaryConfig(PluginConfigBase):
 
     __ui_label__ = "生活日记"
     publish_mode: Literal["关闭", "手动发布", "日记完成后自动发布"] = setting("日记发空间", default="关闭", description="通过已连接的 SnowLuma 发布生活随笔和可选配图。自动模式在写日记日程结束后发布当天日记，每天一篇。")
-    image_service_enabled: bool = setting("启用生图服务", default=False, description="控制新图片生成；已有图片仍可查看。关闭后文字日记、空间文案与聊天照常运行。")
+    image_service_enabled: bool = setting("启用图片生成服务", default=False, description="开启后可生成空间随笔配图和聊天图片。")
     chat_images_enabled: bool = setting("聊天中展示生活图片", default=False, description="允许追问时发图，以及主动分享时由模型选择配图；同一经历复用已保存图片。")
-    image_enabled: bool = setting("空间随笔自动配图", default=False, description="开启生图服务后，为新写好的空间随笔生成一张配图；关闭此项可在详情中手动生成。聊天配图由「聊天中展示生活图片」控制。")
+    image_enabled: bool = setting("空间随笔自动配图", default=False, description="开启图片生成服务后，为新写好的空间随笔生成一张配图；关闭此项可在详情中手动生成。聊天配图由「聊天中展示生活图片」控制。")
     image_base_url: str = setting("生图接口地址（生图必填）", default="https://api.openai.com/v1", description="填写支持 OpenAI 图片生成接口的服务地址，包含 /v1；插件调用 /images/generations。")
-    image_api_key: str = setting("生图 API Key（生图必填）", default="", description="填写生图服务提供的密钥。", json_schema_extra={"x-widget": "password", "input_type": "password"})
+    image_api_key: str = setting("生图 API Key（生图必填）", default="", description="填写图片生成服务提供的密钥。", json_schema_extra={"x-widget": "password", "input_type": "password"})
     image_model: str = setting("生图模型（生图必填）", default="gpt-image-1", description="填写服务实际支持的图片生成模型名称。每次生成一张横向 4:3、1024×768 图片。保存后可点击配置页顶部「测试生图配置」验证。")
-    image_style: str = setting("配图风格（选填）", default="温暖的手绘生活插画，柔和色彩，有日记感", description="生成画面时使用的整体风格，可按喜好修改。", max_length=800)
+    image_style: str = setting("空间随笔与测试风格（选填）", default="自然生活照片，随手拍的构图，自然光，具体物件清楚，横向4:3", description="用于空间随笔配图和「测试生图配置」，默认采用自然生活照片风格，可按喜好修改。", max_length=800)
+    chat_image_style: str = setting("聊天图片风格（选填）", default="自然生活照片，随手拍的构图，自然光，具体物件清楚，横向4:3", description="用于聊天追问发图和主动分享配图，默认采用自然生活照片风格；同一经历已有图片会继续复用，新风格用于后续生成。", max_length=800)
     publish_visibility: Literal["所有人", "好友", "仅自己"] = setting("空间可见范围", default="好友", description="生成文案后可在日记详情预览、编辑和发布。")
     enabled: bool = setting("自动写日记", default=True, description="由生活规划模型安排写日记的时间，进入活动窗口后回顾当天生活")
 

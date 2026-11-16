@@ -27,6 +27,9 @@ IMAGE_INSTRUCTION = "输出 JSON：content（正文）、image_prompt（1200字�
 
 
 class DiaryImages:
+    request_timeout = 180
+    download_timeout = 60
+
     def __init__(self, engine, context, config):
         self.store, self.ctx, self.config = engine.store, context, config
         with self.store.db:
@@ -65,25 +68,25 @@ class DiaryImages:
                           data=json.dumps(payload).encode(),
                           headers={"Authorization": "Bearer " + config.image_api_key, "Content-Type": "application/json"})
         try:
-            with urlopen(request, timeout=180) as response:
+            with urlopen(request, timeout=self.request_timeout) as response:
                 result = json.load(response)
         except HTTPError as error:
-            raise RuntimeError(f"生图服务返回 HTTP {error.code}：{error.read().decode('utf-8', errors='replace')[:1000]}") from error
+            raise RuntimeError(f"图片生成服务返回 HTTP {error.code}：{error.read().decode('utf-8', errors='replace')[:1000]}") from error
         item = result["data"][0]
         if item.get("b64_json"):
             data = base64.b64decode(item["b64_json"], validate=True)
         else:
-            with urlopen(item["url"], timeout=60) as response:
+            with urlopen(item["url"], timeout=self.download_timeout) as response:
                 data = response.read()
         return data, result.get("usage", {})
 
     async def illustrate(self, category, day, now, prompt=""):
         if not self.config.diary.image_service_enabled:
-            raise ValueError("生图服务已关闭，请在模型设置中开启")
+            raise ValueError("图片生成服务已关闭，请在模型设置中开启")
         row = self.editable(category, day)
         config = self.config.diary
         if not all(value.strip() for value in (config.image_base_url, config.image_api_key, config.image_model)):
-            raise ValueError("请在模型设置的生图服务中填写生图接口地址、API Key 和模型")
+            raise ValueError("请在模型设置的图片生成服务中填写生图接口地址、API Key 和模型")
         prompt = prompt.strip() or row.get("image_prompt", "")
         if len(prompt) > 1200:
             raise ValueError("画面描述请控制在1200字以内")
@@ -100,7 +103,7 @@ class DiaryImages:
                     IMAGE_INSTRUCTION + "正文沿用下面的内容，只补充画面描述：" + row["content"][:4000], IllustratedText)
                 prompt = idea.image_prompt
             row["image_prompt"] = prompt
-            style = "自然生活照片，随手拍的构图，自然光，具体物件清楚，横向4:3" if category == "experience_image" else config.image_style
+            style = config.chat_image_style if category == "experience_image" else config.image_style
             data, tokens = await asyncio.to_thread(self.request, prompt + "\n画面风格：" + style)
             if len(data) > self.config.retention.image_max_mb * 1024 * 1024:
                 raise ValueError("生成的图片超过配图容量上限，请调整容量设置")
@@ -111,7 +114,7 @@ class DiaryImages:
             elif data.startswith(b"RIFF") and data[8:12] == b"WEBP":
                 mime, extension = "image/webp", "webp"
             else:
-                raise ValueError("生图服务返回的内容不是 PNG、JPEG 或 WebP 图片")
+                raise ValueError("图片生成服务返回的内容不是 PNG、JPEG 或 WebP 图片")
             relative = f"diary_images/{category}-{uuid4().hex}.{extension}"
             path = Path(self.ctx.paths.data_dir) / relative
             await asyncio.to_thread(path.parent.mkdir, parents=True, exist_ok=True)

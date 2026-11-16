@@ -167,12 +167,37 @@ async def test_config_widget_uses_image_test_job(plugin, monkeypatch):
     assert not states['image_test_result'].visible
     service(p, monkeypatch)
     await p.on_config_widget_action('test_image')
+    p._image_test_started -= 12
+    running = await p.get_config_widget_state()
+    assert running['test_image'].disabled
+    assert p.now().strftime('%Y-%m-%d %H:%M:%S') in running['image_test_result'].text
+    assert '已用时 12 秒' in running['image_test_result'].text
+    assert '请求超时 180 秒' in running['image_test_result'].text
+    assert '链接下载超时 60 秒' in running['image_test_result'].text
     await asyncio.gather(*list(p.jobs))
     states = await p.get_config_widget_state()
     ConfigWidgetSnapshot(widgets=p.config_widgets, states=states)
     assert not states['test_image'].disabled
     assert states['image_test_result'].tone == 'success'
     assert '已生成' in states['image_test_result'].text
+    assert '总用时' in states['image_test_result'].text
     assert states['image_test_result'].visible
     p._image_test_feedback_until = 0
     assert not (await p.get_config_widget_state())['image_test_result'].visible
+
+
+@pytest.mark.parametrize("category,expected", [("diary_publication", "空间风格"), ("image_test", "空间风格"), ("experience_image", "聊天风格")])
+async def test_image_style_follows_use(plugin, monkeypatch, category, expected):
+    p = plugin
+    service(p, monkeypatch)
+    p.config.diary.image_style = "空间风格"
+    p.config.diary.chat_image_style = "聊天风格"
+    prompts = []
+    def request(self, prompt):
+        prompts.append(prompt)
+        return PNG, {}
+    images = p.diary_publisher.images
+    monkeypatch.setattr(type(images), 'request', request)
+    images.put(category, {"id": "style-test", "status": "草稿", "content": "窗边茶杯"})
+    await images.illustrate(category, "style-test", p.now(), "窗边茶杯")
+    assert prompts == ["窗边茶杯\n画面风格：" + expected]

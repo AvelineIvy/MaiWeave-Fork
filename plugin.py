@@ -67,17 +67,25 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
     ]
 
     _image_test_feedback_until = 0.0
+    _image_test_started = 0.0
+    _image_test_seconds = 0.0
+    _image_test_date = ""
 
     async def get_config_widget_state(self):
         running = self._image_test_feedback_until == float("inf")
         visible = monotonic() < self._image_test_feedback_until
         text, tone = "正在测试生图配置…", "neutral"
+        if running:
+            images = self.diary_publisher.images
+            seconds = int(monotonic() - self._image_test_started)
+            text += f" 已用时 {seconds} 秒 · 请求超时 {images.request_timeout} 秒；链接下载超时 {images.download_timeout} 秒"
         if visible and not running:
             result = await self.ui_image_test()
             text = "测试失败：" + result["error"] if result["error"] else "测试完成：" + result["status"]
-            if result["seconds"] is not None:
-                text += f" · {result['seconds']} 秒"
+            text += f" · 总用时 {self._image_test_seconds:.1f} 秒"
             tone = "error" if result["error"] else "success"
+        if visible:
+            text += f" · 测试时间 {self._image_test_date}"
         return {
             "test_image": ConfigWidgetState(disabled=not self.config.diary.image_service_enabled or running),
             "image_test_result": ConfigWidgetState(text=text[:2000], tone=tone, visible=visible),
@@ -107,8 +115,8 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
             ("quota", "proactive", "每日发送额度", "每日额度是最多发送次数，分享内容来自生活经历和待跟进事项。", ["daily_limit"]),
         ]
         groups += [
-            ('image_service', 'diary', '生图服务', '空间随笔与聊天共用此接口。', ['image_service_enabled', 'image_base_url', 'image_api_key', 'image_model', 'image_style']),
-            ('image_use', 'diary', '图片用途', '按用途开启，聊天展示采用自然生活照片风格。', ['chat_images_enabled', 'image_enabled']),
+            ('image_service', 'diary', '图片生成服务', '空间随笔与聊天共用此接口。', ['image_service_enabled', 'image_base_url', 'image_api_key', 'image_model', 'image_style', 'chat_image_style']),
+            ('image_use', 'diary', '图片用途', '分别设置聊天图片和空间随笔自动配图。', ['chat_images_enabled', 'image_enabled']),
             ('diary', 'diary', '生活日记', '安排写日记，整理空间随笔。', ['enabled', 'publish_mode', 'publish_visibility']),
             ('model_default', 'life', '默认生活模型', '各功能选择跟随默认时使用此任务。', ['model_task']),
             ('model_arrangement', 'models', '日常安排', '按功能选择 MaiBot 已配置的模型任务。', ['activity', 'diary_schedule', 'habits', 'goals']),

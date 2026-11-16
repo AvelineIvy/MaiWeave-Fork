@@ -62,7 +62,7 @@ class WebUI:
         if old.get("image_status") == "生成中":
             raise ValueError("生图测试正在进行，请等待结果")
         if not self.config.diary.image_service_enabled:
-            raise ValueError("请先保存生图配置并开启生图服务")
+            raise ValueError("请先保存生图配置并开启图片生成服务")
         row = {**old, "id": "latest", "status": "草稿", "content": "窗边木桌上的一杯热茶与一盆小绿植",
                "tested_model": self.config.diary.image_model, "tested_at": self.now().isoformat()}
         images.put("image_test", row)
@@ -70,7 +70,10 @@ class WebUI:
             try:
                 await images.illustrate("image_test", "latest", self.now(), row["content"])
             finally:
+                self._image_test_seconds = monotonic() - self._image_test_started
                 self._image_test_feedback_until = monotonic() + 30
+        self._image_test_date = self.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._image_test_started = monotonic()
         self._image_test_feedback_until = float("inf")
         return self.start_job("测试生图配置", run())
 
