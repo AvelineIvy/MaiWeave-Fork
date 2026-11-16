@@ -38,12 +38,19 @@ async def test_protocol_request_and_response(plugin, monkeypatch, protocol, refe
     assert request.full_url.endswith(images.request_endpoint(reference))
     if protocol == "OpenAI 图片编辑" and reference:
         assert b'filename="character.png"' in request.data
+        assert b'1024x768' in request.data
     else:
         payload = json.loads(request.data)
         assert ("data:image/png;base64," in request.data.decode() or '"inlineData"' in request.data.decode()) == reference
         if protocol == "DashScope 多模态":
             assert payload["parameters"]["negative_prompt"] == cfg.image_negative_prompt
+            assert payload["parameters"]["size"] == "1024*768"
+        if protocol in {"OpenAI 图片编辑", "通义千问兼容接口"}:
+            assert payload["size"] == "1024x768"
+        if protocol == "OpenAI Chat 生图":
+            assert "4:3 横向" in payload["messages"][0]["content"][0]["text"]
         if protocol == "Gemini 原生":
+            assert payload["generationConfig"]["imageConfig"]["aspectRatio"] == "4:3"
             assert request.get_header("X-goog-api-key") == "test"
             assert "Authorization" not in request.headers
             assert tokens == {"input_tokens": 12, "output_tokens": 20, "total_tokens": 32}

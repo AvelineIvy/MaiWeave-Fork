@@ -78,12 +78,16 @@ async def test_manual_prompt_and_fixed_test(plugin, monkeypatch):
     row = await p.diary_publisher.illustrate(day, now, "手写的人物构图")
     assert row["image_prompt"] == "手写的人物构图"
     p.ctx.llm.generate.reset_mock()
+    p.config.diary.image_character_reference_enabled = True
+    p.config.diary.image_character_reference_url = "https://example.com/character.png"
     prompts = []
     monkeypatch.setattr(type(p.diary_publisher.images), "request", lambda self, prompt: (prompts.append(prompt) or PNG, {}))
     await p.ui_test_image()
     await asyncio.gather(*list(p.jobs))
     p.ctx.llm.generate.assert_not_awaited()
     assert "黑色齐肩发" not in prompts[-1]
+    assert "拍摄构图：" not in prompts[-1]
+    assert p.config.diary.image_style in prompts[-1]
 
 
 async def test_enable_card_after_old_image_cleaned(plugin, monkeypatch):
@@ -306,7 +310,8 @@ async def test_manual_scene_drops_previous_selfie(plugin, monkeypatch):
 
 
 @pytest.mark.parametrize("entry", ["追问", "自然交流", "主动表达", "空间"])
-async def test_selfie_uses_reference_across_entries(plugin, monkeypatch, entry):
+@pytest.mark.parametrize("selfie", [True, False])
+async def test_selfie_uses_reference_across_entries(plugin, monkeypatch, entry, selfie):
     p = plugin
     now, event = setup(p, monkeypatch)
     cfg = p.config.diary
@@ -316,7 +321,7 @@ async def test_selfie_uses_reference_across_entries(plugin, monkeypatch, entry):
     cfg.image_character_appearance = "黑色齐肩发"
     captured = []
     monkeypatch.setattr(type(p.diary_publisher.images), "request", lambda self, prompt, reference="": (captured.append((prompt, reference)) or PNG, {}))
-    answer = {"success": True, "response": json.dumps({"content": "展示手作", "image_prompt": "麦麦拿着兔子自拍", "selfie": True, "character_visible": False})}
+    answer = {"success": True, "response": json.dumps({"content": "展示手作", "image_prompt": "麦麦拿着兔子自拍" if selfie else "桌面兔子近景", "selfie": selfie, "character_visible": False})}
     if entry == "空间":
         now, day = prepare(p)
         cfg.image_enabled = True
@@ -325,7 +330,7 @@ async def test_selfie_uses_reference_across_entries(plugin, monkeypatch, entry):
     else:
         p.ctx.llm.generate.return_value = answer
         if entry == "追问":
-            await p.life_images.requested(event["id"], "chat-a", now, framing="发张自拍")
+            await p.life_images.requested(event["id"], "chat-a", now, framing="发张自拍" if selfie else "看看桌面兔子")
         else:
             receipt = {"id": "selfie-share", "session": "chat-a", "created": now.isoformat(), "mode": entry,
                        "outcome": "实际已发送", "sent_at": now.isoformat(), "experience_id": event["id"], "image_requested": True}
@@ -338,9 +343,12 @@ async def test_selfie_uses_reference_across_entries(plugin, monkeypatch, entry):
         row = p.store.get("experience_image", event["id"])
         assert p.ctx.send.image.await_count == 1
         assert p.life_images.context("chat-a")[-1]["experience_id"] == event["id"]
-    assert row["image_character_visible"] is True
-    assert len(captured) == 1 and captured[0][1] == cfg.image_character_reference_url
-    assert "黑色齐肩发" in captured[0][0] and "拍摄构图：" in captured[0][0]
+    assert row["image_character_visible"] is selfie
+    assert len(captured) == 1 and captured[0][1] == (cfg.image_character_reference_url if selfie else "")
+    assert ("黑色齐肩发" in captured[0][0]) == selfie
+    assert ("拍摄构图：" in captured[0][0]) == selfie
+    style = cfg.image_style if entry == "空间" else cfg.chat_image_style
+    assert style in captured[0][0]
     assert p.ctx.llm.generate.await_count == 1
 
 
@@ -364,3 +372,48 @@ async def test_failed_selfie_retry_changes_to_object(plugin, monkeypatch):
     assert "只看桌面的兔子" in captured[0][0]
     assert p.ctx.send.image.await_count == 1
     assert len(p.store.all("image_delivery")) == 1
+
+
+async def test_character_trial_switches_scene_and_config_test(plugin, monkeypatch):
+    """试画切换构图后替换图片，配置测试继续使用固定场景。"""
+    from pathlib import Path
+    p = plugin
+    service(p, monkeypatch)
+    cfg = p.config.diary
+    cfg.image_character_enabled = cfg.image_character_reference_enabled = True
+    cfg.image_character_reference_url = "https://example.com/character.png"
+    cfg.image_character_appearance = "黑色齐肩发"
+    cfg.chat_image_style = "聊天画风"
+    cfg.image_style = "空间画风"
+    captured = []
+    monkeypatch.setattr(type(p.diary_publisher.images), "request", lambda self, prompt, reference="": (captured.append((prompt, reference)) or PNG, {}))
+    for scene in ("自拍", "物件近景", ""):
+        job = await p.ui_test_image(scene, "展示刚做好的小兔")
+        await asyncio.gather(*list(p.jobs))
+        assert p.store.get("job", job["task_id"])["status"] == "已完成"
+        result = await p.ui_character_trial()
+        assert result["image"] and result["status"] == "已生成"
+        assert result["scene"] == (scene or "配置测试")
+        prompt, reference = captured[-1]
+        assert ("拍摄构图：" in prompt) == (scene == "自拍")
+        assert reference == (cfg.image_character_reference_url if scene == "自拍" else "")
+        assert ("聊天画风" if scene else "空间画风") in prompt
+        assert len(list((Path(p.ctx.paths.data_dir) / "diary_images").iterdir())) == 1
+    p.ctx.llm.generate.assert_not_awaited()
+    p.ctx.send.image.assert_not_awaited()
+    assert p.store.all("experience_image") == []
+
+
+async def test_failed_trial_hides_previous_preview(plugin, monkeypatch):
+    p = plugin
+    service(p, monkeypatch)
+    await p.ui_test_image("物件近景", "热茶")
+    await asyncio.gather(*list(p.jobs))
+    def fail(self, prompt):
+        raise TimeoutError("图片服务超时")
+    monkeypatch.setattr(type(p.diary_publisher.images), "request", fail)
+    await p.ui_test_image("物件近景", "蛋包饭")
+    await asyncio.gather(*list(p.jobs))
+    result = await p.ui_character_trial()
+    assert result["status"] == "生成失败" and result["image"] == ""
+    assert "超时" in result["error"]

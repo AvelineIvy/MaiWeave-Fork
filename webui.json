@@ -1998,6 +1998,11 @@
           "api": "ui_character_image",
           "version": "1",
           "parameters": {}
+        },
+        "trial": {
+          "api": "ui_character_trial",
+          "version": "1",
+          "parameters": {}
         }
       },
       "actions": {
@@ -2030,6 +2035,21 @@
           "api": "ui_generate_character",
           "version": "1",
           "parameters": {}
+        },
+        "trial": {
+          "api": "ui_test_image",
+          "version": "1",
+          "parameters": {
+            "scene": {
+              "type": "string",
+              "required": true
+            },
+            "prompt": {
+              "type": "string",
+              "required": true,
+              "max_length": 1000
+            }
+          }
         }
       }
     }

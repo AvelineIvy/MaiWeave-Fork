@@ -100,10 +100,14 @@ class WebUI:
         last = usages[-1] if usages else {}
         return {"enabled": self.config.diary.image_service_enabled,
                 "model": self.config.diary.image_model, "tested_model": row.get("tested_model", ""), "tested_at": row.get("tested_at", ""), "status": row.get("image_status", "尚未测试"),
-                "error": row.get("image_error", ""), "seconds": last.get("seconds")}
+                "error": row.get("image_error", ""), "seconds": None if row.get("image_status") == "生成中" else last.get("seconds")}
 
     @API("ui_test_image", description="使用已保存的生图配置生成测试图片")
-    async def ui_test_image(self) -> dict:
+    async def ui_test_image(self, scene: str = "", prompt: str = "") -> dict:
+        if scene not in {"", "自拍", "物件近景"}:
+            raise ValueError("请选择自拍或物件近景")
+        if scene and not 1 <= len(prompt.strip()) <= 1000:
+            raise ValueError("请填写1000字以内的场景描述")
         images = self.diary_publisher.images
         old = self.store.find("image_test", "latest") or {}
         if old.get("image_status") == "生成中":
@@ -112,10 +116,16 @@ class WebUI:
             raise ValueError("请先保存生图配置并开启图片生成服务")
         row = {**old, "id": "latest", "status": "草稿", "content": "窗边木桌上的一杯热茶与一盆小绿植",
                "tested_model": self.config.diary.image_model, "tested_at": self.now().isoformat()}
+        for key in ("image_selfie", "image_character_visible", "test_scene"):
+            row.pop(key, None)
+        if scene:
+            framing = "前置自拍，人物看向镜头。" if scene == "自拍" else "第一人称物件近景或俯拍，物件为主体，可带入局部手部，脸和身体留在画外。"
+            row.update(content=prompt.strip(), image_prompt=framing + prompt.strip(), test_scene=scene,
+                       image_selfie=scene == "自拍", image_character_visible=scene == "自拍")
         images.put("image_test", row)
         async def run():
             try:
-                await images.illustrate("image_test", "latest", self.now(), row["content"])
+                await images.illustrate("image_test", "latest", self.now(), "" if scene else row["content"])
             finally:
                 self._image_test_seconds = monotonic() - self._image_test_started
                 self._image_test_feedback_until = monotonic() + 30
@@ -123,6 +133,16 @@ class WebUI:
         self._image_test_started = monotonic()
         self._image_test_feedback_until = float("inf")
         return self.start_job("测试生图配置", run())
+
+    @API("ui_character_trial", description="查看角色试画的结果与图片")
+    async def ui_character_trial(self) -> dict:
+        result = await self.ui_image_test()
+        row = self.store.find("image_test", "latest") or {}
+        result["timeout"] = self.diary_publisher.images.request_timeout
+        result["scene"] = row.get("test_scene", "配置测试")
+        result["image"] = (await asyncio.to_thread(self.diary_publisher.images.encoded, row, 1280)
+                           if row.get("image_file") and row.get("image_status") == "已生成" else "")
+        return result
 
     @API("ui_life_images", description="查看生活图片和发送记录")
     async def ui_life_images(self) -> dict:

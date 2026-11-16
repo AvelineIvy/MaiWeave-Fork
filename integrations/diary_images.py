@@ -335,17 +335,18 @@ class DiaryImages:
                 else:
                     row.pop("image_character_visible", None)
             row["image_prompt"] = prompt
-            style = config.chat_image_style if category == "experience_image" else config.image_style
-            character = self.character_prompt(row.get("image_character_visible", False)) if category != "image_test" else ""
+            character_scene = category != "image_test" or bool(row.get("test_scene"))
+            style = config.chat_image_style if category == "experience_image" or row.get("test_scene") else config.image_style
+            character = self.character_prompt(row.get("image_character_visible", False)) if character_scene else ""
             full_prompt = prompt + ("\n" + character if character else "") + "\n画面风格：" + style
-            if category != "image_test" and row.get("image_selfie"):
+            if character_scene and row.get("image_selfie"):
                 full_prompt += "\n拍摄构图：" + SELFIE_COMPOSITION
             if row.get("image_request"):
                 full_prompt += "\n本次用户的拍摄要求：" + row["image_request"][:300]
             if config.image_negative_prompt.strip() and not self.separate_negative():
                 full_prompt += "\n负面提示词（画面中避免）：" + config.image_negative_prompt.strip()
             reference = ""
-            if config.image_character_enabled and config.image_character_reference_enabled and row.get("image_character_visible") and category != "image_test":
+            if config.image_character_enabled and config.image_character_reference_enabled and row.get("image_character_visible") and character_scene:
                 reference = self.reference_source()
                 if not reference:
                     raise ValueError("请在角色与图片页面上传参考图，或填写图片直链")
