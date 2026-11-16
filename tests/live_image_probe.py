@@ -36,6 +36,14 @@ class ImageProbe(Probe):
             now = p.now()
             stream = "test-local-session"
             event = p.engine.record_experience(ExperienceInput(summary="折好一枚三角书角书签，夹在摊开的书页上", source="simulated", occurred_at=now.isoformat(), evidence="生活图片实机测试", details={"形状":"三角书角，平整折痕", "地点":"窗边木桌"}), stream, now)
+            self.result.update(stage="验证服务不可用后的聊天提示")
+            service_url = p.config.diary.image_base_url
+            p.config.diary.image_base_url = "http://127.0.0.1:1/v1"
+            failed = await p.show_life("send", event["id"], stream_id=stream)
+            await asyncio.gather(*list(p.jobs))
+            assert p.store.get("job", failed["task_id"])["status"] == "失败"
+            assert p.store.get("experience_image", event["id"])["image_status"] == "生成失败"
+            p.config.diary.image_base_url = service_url
             self.result.update(stage="生成并发送追问图片")
             await p.show_life("send", event["id"], stream_id=stream)
             await asyncio.gather(*list(p.jobs))

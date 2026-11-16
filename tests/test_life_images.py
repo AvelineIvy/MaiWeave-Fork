@@ -66,3 +66,27 @@ async def test_image_send_failure_preserves_reusable_picture(plugin, monkeypatch
     assert p.store.get("experience_image", event["id"])["image_file"]
     assert p.store.all("image_delivery")[-1]["status"] == "发送失败"
     assert p.life_images.context("chat-a") == []
+
+
+async def test_requested_failure_notifies_original_chat_and_can_retry(plugin, monkeypatch):
+    import asyncio
+    p = plugin
+    now, event = setup(p, monkeypatch)
+    request = p.life_images.images.request
+    def fail(prompt):
+        raise TimeoutError("生图超时")
+    monkeypatch.setattr(p.life_images.images, "request", fail)
+    p.ctx.send.text.return_value = {"sent": True}
+    job = await p.show_life("send", event["id"], stream_id="chat-a")
+    await asyncio.gather(*list(p.jobs))
+    assert p.store.get("job", job["task_id"])["status"] == "失败"
+    assert p.store.get("experience_image", event["id"])["image_status"] == "生成失败"
+    assert p.ctx.send.text.await_args.args[1] == "chat-a"
+    assert p.ctx.send.text.await_args.kwargs["storage_message"] is True
+    p.ctx.send.image.assert_not_awaited()
+    monkeypatch.setattr(p.life_images.images, "request", request)
+    await p.show_life("send", event["id"], stream_id="chat-a")
+    await asyncio.gather(*list(p.jobs))
+    assert p.ctx.send.image.await_count == 1
+    assert p.ctx.send.text.await_count == 1
+    assert p.life_images.context("chat-a")

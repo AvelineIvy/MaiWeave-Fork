@@ -19,6 +19,18 @@ class LifeImages:
         return [{"id": row["id"], "summary": row["summary"][:200], "occurred_at": row["occurred_at"],
                  "has_image": bool((self.store.find("experience_image", row["id"]) or {}).get("image_file"))} for row in rows]
 
+    async def requested(self, experience_id, session, now):
+        """追问图片的后台任务失败时，在原聊天告知结果。"""
+        self.engine.owned("experience", experience_id, session)
+        try:
+            return await self.send(experience_id, session, now)
+        except Exception:
+            result = await self.ctx.send.text("这次图片没发出来，可以稍后再让我试试。", session,
+                return_details=True, storage_message=True, sync_to_maisaka_history=True)
+            if not result["sent"]:
+                self.ctx.logger.error("生活图片失败提示发送失败：%s", result.get("error"))
+            raise
+
     async def send(self, experience_id, session, now, *, share_id=""):
         if not self.config.diary.chat_images_enabled:
             raise ValueError("聊天图片已关闭，可在模型设置的图片用途中开启")
