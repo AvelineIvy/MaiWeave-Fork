@@ -122,6 +122,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         ]
         groups += [
             ('image_service', 'diary', '图片生成服务', '空间随笔与聊天共用此接口。', ['image_service_enabled', 'image_base_url', 'image_api_key', 'image_model', 'image_reference_protocol']),
+            ('image_use', 'diary', '图片用途', '选择聊天与空间的配图用途。', ['chat_images_enabled', 'image_enabled']),
             ('diary', 'diary', '生活日记', '安排写日记，整理空间随笔。', ['enabled', 'publish_mode', 'publish_visibility']),
             ('model_default', 'life', '默认生活模型', '各功能选择跟随默认时使用此任务。', ['model_task']),
             ('model_arrangement', 'models', '日常安排', '按功能选择 MaiBot 已配置的模型任务。', ['activity', 'diary_schedule', 'habits', 'goals']),
@@ -170,7 +171,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         ]}
         advanced = ["planning", "world_updates", "rhythm_details", "dream_details", "followup_details", "retry_details", "reading_details", "books", "context_limits", "book_context", "retention", "plugin"]
         schema["layout"]["tabs"].extend([
-            {"id": "models", "title": "模型设置", "sections": ["model_default", "model_arrangement", "model_expression", "model_information", "image_service"], "order": 5},
+            {"id": "models", "title": "模型设置", "sections": ["model_default", "model_arrangement", "model_expression", "model_information", "image_service", "image_use"], "order": 5},
             {"id": "advanced", "title": "高级设置", "sections": advanced, "order": 6},
         ])
         for key in advanced:

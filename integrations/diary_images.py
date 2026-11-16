@@ -32,7 +32,7 @@ class IllustratedText(BaseModel):
 
 CHARACTER_FIELDS = ("image_character_enabled", "image_character_reference_enabled", "image_character_reference_url",
                     "image_character_appearance", "image_character_clothing", "image_style", "chat_image_style",
-                    "image_negative_prompt", "chat_images_enabled", "image_enabled")
+                    "image_negative_prompt")
 
 
 IMAGE_INSTRUCTION = "输出 JSON：content（正文）、image_prompt（1200字以内的中文画面描述）。配图选正文中的一个生活瞬间，着重场景、物件、光线与氛围，具体细节取自素材。"
@@ -63,7 +63,7 @@ class DiaryImages:
 
     def save_character(self, values):
         if set(values) - set(CHARACTER_FIELDS):
-            raise ValueError("这里只保存角色卡、画风和图片用途")
+            raise ValueError("这里只保存角色卡和画风")
         config = self.config.diary
         updated = type(config).model_validate({**config.model_dump(), **values})
         settings = {key: getattr(updated, key) for key in CHARACTER_FIELDS}
@@ -74,7 +74,10 @@ class DiaryImages:
         return {"message": "角色与图片设置已保存，新生成的图片会采用这些设置。"}
 
     def instruction(self):
-        text = IMAGE_INSTRUCTION
+        text = IMAGE_INSTRUCTION + (
+            "区分拍摄视角：明确要自拍时使用前置镜头，让人物看向镜头并结合当前活动；"
+            "展示物件时使用第一人称近景或俯拍，主体是物件，手部仅在动作需要时出现；"
+            "看做事的样子时可用旁观抓拍。优先遵循本次展示要求，场景、时段与物件沿用素材。")
         if self.config.diary.image_character_enabled:
             text += ("同时输出 character_visible 布尔值：画面包含麦麦本人时为 true，物件或风景特写为 false。"
                      "根据本次展示要求和生活素材选择构图：看书签、饭菜等物件时聚焦物件；"

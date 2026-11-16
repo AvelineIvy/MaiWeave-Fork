@@ -40,7 +40,7 @@ class LifeImages:
 
     async def send(self, experience_id, session, now, *, share_id="", framing=""):
         if not self.config.diary.chat_images_enabled:
-            raise ValueError("聊天图片已关闭，可在「角色与图片 → 图片用在哪里」中开启")
+            raise ValueError("聊天图片已关闭，可在「插件配置 → 模型设置 → 图片用途」中开启")
         event = self.engine.owned("experience", experience_id, session)
         image = self.store.find("experience_image", experience_id)
         content = self.content(event)

@@ -51,9 +51,11 @@ class WebUI:
         images = self.diary_publisher.images
         return {**await asyncio.to_thread(images.reference_view), "settings": images.character_settings(),
                 "draft": self._character_draft, "generating": self._character_draft_running,
-                "draft_message": self._character_draft_text}
+                "draft_message": self._character_draft_text,
+                "style_preset": {key: type(self.config.diary).model_fields[key].default
+                                 for key in ("image_style", "chat_image_style", "image_negative_prompt")}}
 
-    @API("ui_save_character", description="保存角色卡、画风和图片用途")
+    @API("ui_save_character", description="保存角色卡和画风")
     async def ui_save_character(self, content: str) -> dict:
         return self.diary_publisher.images.save_character(json.loads(content))
 

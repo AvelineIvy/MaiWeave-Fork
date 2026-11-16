@@ -120,6 +120,9 @@ class ContinuityConfig(PluginConfigBase):
     followup_hours: int = setting("未完成事项跟进间隔（小时）", default=24, ge=1, description="关系中的未解决事项进入一次性跟进队列")
 
 
+LIFE_IMAGE_STYLE = '细腻的日系二维生活插画，清晰轻盈的线条，柔和赛璐璐上色与细腻渐变，低饱和奶油色和暖棕色调。光线跟随当前场景：日间用柔和窗光或自然光，夜间用温暖灯光，保留明暗层次与通透感。头发有细碎发丝，衣物、纸张、食物与手作物有精细的插画材质；背景是有生活痕迹的真实空间，以柔和景深突出主体。自拍时采用近距离前置镜头视角，人物自然看向镜头，表情亲近放松，可与正在做的事或手中的物件同框，构图有轻微倾斜和自然裁切。拍食物、书签等物件时采用角色第一人称的桌边或俯拍视角，突出主体和周围生活细节；手部仅在动作需要时入镜。旁观抓拍按本次要求呈现人物与活动。人物外貌沿用角色卡或参考图，地点、时段、穿着和物件取自本次生活内容。整体像分享给熟人的温柔日常，画面保持二维动画插画质感。'
+
+
 class DiaryConfig(PluginConfigBase):
     """模型会安排写日记的时间，写好的日记可在「日记与梦境」中查看，也可发布到 QQ 空间。"""
 
@@ -128,7 +131,7 @@ class DiaryConfig(PluginConfigBase):
     image_service_enabled: bool = setting("启用图片生成服务", default=False, description="开启后可生成空间随笔配图和聊天图片。")
     chat_images_enabled: bool = setting("聊天中展示生活图片", default=False, description="允许追问时发图，以及主动分享时由模型选择配图；同一经历复用已保存图片。")
     image_enabled: bool = setting("空间随笔自动配图", default=False, description="开启图片生成服务后，为新写好的空间随笔生成一张配图；关闭此项可在详情中手动生成。聊天配图由「聊天中展示生活图片」控制。")
-    image_base_url: str = setting("生图接口地址（生图必填）", default="https://api.openai.com/v1", description="填写支持 OpenAI 图片生成接口的服务地址，包含 /v1；文字生图调用 /images/generations，角色参考图调用 /images/edits。")
+    image_base_url: str = setting("生图接口地址（生图必填）", default="https://api.openai.com/v1", description="填写所选图片接口的基础地址；OpenAI 与通义兼容地址通常包含 /v1，Gemini 与 DashScope 填服务根地址。")
     image_api_key: str = setting("生图 API Key（生图必填）", default="", description="填写图片生成服务提供的密钥。", json_schema_extra={"x-widget": "password", "input_type": "password"})
     image_model: str = setting("生图模型（生图必填）", default="gpt-image-1", description="填写服务实际支持的图片生成模型名称。每次生成一张横向 4:3、1024×768 图片。保存后可点击配置页顶部「测试生图配置」验证。")
     image_character_enabled: bool = setting("启用麦麦角色卡", default=False, description="空间和聊天共用一张角色卡，由提示词模型结合场景决定麦麦是否入镜。")
@@ -137,9 +140,9 @@ class DiaryConfig(PluginConfigBase):
     image_character_reference_url: str = setting("参考图片地址（选填）", default="", description="也可填写 PNG、JPEG 或 WebP 的 HTTP(S) 直链。已上传的参考图优先使用；空间和聊天共用，已有图片继续复用。", max_length=2000)
     image_character_appearance: str = setting("外貌设定（选填）", default="", description="填写发型、发色、眼睛和体型等稳定特征，例如：黑色齐肩发、棕色眼睛。可结合参考图使用。", max_length=800)
     image_character_clothing: str = setting("常用穿着（选填）", default="", description="填写常穿的服饰和偏好，例如：米白色针织衫。实际穿着会结合活动场景调整。已有图片继续复用，修改后用于新图。", max_length=400)
-    image_style: str = setting("空间随笔与测试风格（选填）", default='细腻自然的二维日常插画，柔和光线与协调色彩，像随手发给熟人的生活照片。保留轻松随拍感，人物表情和动作自然，外貌沿用角色卡。人物入镜时可采用自然自拍或生活抓拍构图，按当前活动选择上半身、半身或更合适的景别；物件与风景画面突出主体细节和生活氛围。地点、动作、物件及是否有人入镜以本次画面描述为准。', description="用于空间随笔配图和「测试生图配置」，默认采用细腻柔和的二维日常插画；人物有自然随拍感，物件与风景沿用本次场景。", max_length=800)
+    image_style: str = setting("空间随笔与测试风格（选填）", default=LIFE_IMAGE_STYLE, description="用于空间随笔配图和「测试生图配置」，默认采用细腻柔和的二维日常插画；人物有自然随拍感，物件与风景沿用本次场景。", max_length=800)
     image_negative_prompt: str = setting("负面提示词（选填）", default='不要写实照片风，不要真实皮肤纹理，不要毛孔，不要 3D 渲染，不要 CGI，不要恐怖谷，不要塑料娃娃感，不要商业海报构图，不要角色立绘感，不要厚涂油画感，不要风格漂移，不要过度夸张萌系，不要畸形手指，不要多余手指，不要文字水印。', description="空间、聊天与生图测试共用，填写希望避免的画风和画面问题；留空关闭。会与画面描述一起提交给图片生成服务。", max_length=800)
-    chat_image_style: str = setting("聊天图片风格（选填）", default='细腻自然的二维日常插画，柔和光线与协调色彩，像随手发给熟人的生活照片。保留轻松随拍感，人物表情和动作自然，外貌沿用角色卡。人物入镜时可采用自然自拍或生活抓拍构图，按当前活动选择上半身、半身或更合适的景别；物件与风景画面突出主体细节和生活氛围。地点、动作、物件及是否有人入镜以本次画面描述为准。', description="用于聊天追问发图和主动分享配图，默认采用细腻柔和的二维日常插画；人物有自然随拍感，同一经历已有图片继续复用，新风格用于后续生成。", max_length=800)
+    chat_image_style: str = setting("聊天图片风格（选填）", default=LIFE_IMAGE_STYLE, description="用于聊天追问发图和主动分享配图，默认采用细腻柔和的二维日常插画；人物有自然随拍感，同一经历已有图片继续复用，新风格用于后续生成。", max_length=800)
     publish_visibility: Literal["所有人", "好友", "仅自己"] = setting("空间可见范围", default="好友", description="生成文案后可在日记详情预览、编辑和发布。")
     enabled: bool = setting("自动写日记", default=True, description="由生活规划模型安排写日记的时间，进入活动窗口后回顾当天生活")
 

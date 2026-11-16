@@ -219,9 +219,9 @@ async def test_character_settings_saved_reloaded_and_validated(plugin):
     p = plugin
     images = p.diary_publisher.images
     await p.ui_save_character(json.dumps({"image_character_enabled": True, "image_character_appearance": "银发",
-                                        "chat_image_style": "水彩", "image_enabled": False}))
+                                        "chat_image_style": "水彩", "image_character_reference_enabled": True}))
     assert p.config.diary.image_character_appearance == "银发"
-    assert not p.config.diary.image_enabled
+    assert p.config.diary.image_character_reference_enabled
     p.config.diary.image_character_appearance = "配置中的旧值"
     DiaryImages(p.engine, p.ctx, p.config)
     assert p.config.diary.image_character_appearance == "银发"
@@ -242,3 +242,34 @@ async def test_character_migrates_existing_values_once(plugin):
     images = DiaryImages(p.engine, p.ctx, p.config)
     assert images.character_settings()["image_style"] == "原有风格"
     assert p.store.get("image_settings", "character")["image_character_appearance"] == "原有外貌"
+
+
+async def test_lifestyle_preset_and_framing(plugin):
+    from maiweave.config import LIFE_IMAGE_STYLE
+    state = await plugin.ui_character_image()
+    assert state["style_preset"]["chat_image_style"] == LIFE_IMAGE_STYLE
+    assert state["style_preset"]["image_style"] == LIFE_IMAGE_STYLE
+    assert len(LIFE_IMAGE_STYLE) <= 800
+    assert "夜间" in LIFE_IMAGE_STYLE and "第一人称" in LIFE_IMAGE_STYLE
+    assert "前置镜头" in plugin.diary_publisher.images.instruction()
+    assert "旁观抓拍" in plugin.diary_publisher.images.instruction()
+    await plugin.ui_save_character(json.dumps(state["style_preset"]))
+    assert plugin.config.diary.chat_image_style == LIFE_IMAGE_STYLE
+
+
+async def test_image_use_follows_plugin_config(plugin):
+    from maiweave.integrations.diary_images import DiaryImages
+    p = plugin
+    saved = p.store.get("image_settings", "character")
+    saved.update(chat_images_enabled=True, image_enabled=True)
+    with p.store.db:
+        p.store.put("image_settings", saved)
+    p.config.diary.chat_images_enabled = False
+    p.config.diary.image_enabled = False
+    DiaryImages(p.engine, p.ctx, p.config)
+    assert not p.config.diary.chat_images_enabled
+    assert not p.config.diary.image_enabled
+    fields = p.get_webui_config_schema()["sections"]["image_use"]["fields"]
+    assert set(fields) == {"chat_images_enabled", "image_enabled"}
+    with pytest.raises(ValueError):
+        await p.ui_save_character(json.dumps({"image_enabled": True}))
