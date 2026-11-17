@@ -97,6 +97,21 @@
 
 开启方式：在 **插件配置 → 模型设置** 配好图片生成服务，并开启 **图片用途 → 聊天追问发图与主动分享配图**。外貌、参考图和画风在 **此刻生活 → 角色与图片** 调整，保存后可以「试画一张」。新图使用横版 4:3，同一经历已有图片时继续复用。[查看图片使用说明 →](https://github.com/ilworkcn/MaiWeave/blob/main/docs/使用手册.md#聊天里看看麦麦做了什么)
 
+### 🧣 出门裹暖一点，回家轻松一点
+
+穿着也跟着生活走。户外气温 -4.3℃，麦麦穿上羽绒服、围好围巾；回到温暖的厨房，换成米白色毛衣。右图使用左图作为人物参考，沿用外貌，按室内场景调整穿着。
+
+<table>
+  <tr>
+    <th width="50%">🍂 公园散步</th>
+    <th width="50%">🏡 厨房里的小日常</th>
+  </tr>
+  <tr>
+    <td><a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-outdoor-outfit.png"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-outdoor-outfit.png" width="400" alt="零下天气里，麦麦穿羽绒服、围巾和手套在公园自拍"></a></td>
+    <td><a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-indoor-outfit.png"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-indoor-outfit.png" width="400" alt="沿用户外图的人物外貌，麦麦换上米白色毛衣，在温暖厨房展示小兔子"></a></td>
+  </tr>
+</table>
+
 ## 📖 上传一本书，开始阅读
 
 1. 在 **MaiWeave · 生活 → 书架与阅读** 上传 TXT、Markdown 或 EPUB。

@@ -43,6 +43,9 @@ CHARACTER_FIELDS = ("image_character_enabled", "image_character_reference_enable
                     "image_negative_prompt")
 
 
+CLOTHING_INSTRUCTION = "穿着优先采用本次拍摄要求和素材中明确的衣服，其次延续同一活动已有画面，最后结合室内外、天气和活动选择。户外按气温、体感和风雨搭配；室内按房间用途与已知供暖情况搭配，室外气温仅供出门参考。参考图提供人物外貌，衣服按本次场景调整。物件近景保持物件为主体，穿着只体现于入镜的袖口等局部。"
+
+
 IMAGE_INSTRUCTION = "输出 JSON：content（正文）、image_prompt（1200字以内的中文画面描述）。配图选正文中的一个生活瞬间，着重场景、物件、光线与氛围，具体细节取自素材。"
 
 
@@ -52,7 +55,7 @@ class DiaryImages:
     retry_delay = 3
 
     def __init__(self, engine, context, config):
-        self.store, self.ctx, self.config = engine.store, context, config
+        self.engine, self.store, self.ctx, self.config = engine, engine.store, context, config
         saved = self.store.find("image_settings", "character")
         if saved is None:
             saved = {"id": "character", **self.character_settings()}
@@ -87,12 +90,48 @@ class DiaryImages:
             "同时输出 selfie 布尔值：用户要求前置自拍、或本次画面选用前置自拍时为 true，"
             "物件随手拍、旁观抓拍和对镜拍照为 false。画面描述只安排主体、动作、场景和视角，画风由用户设置提供。"
             "自拍时单手持机、另一只手展示物件；物件随手拍采用第一人称近景或俯拍，物件为主体，按需展示局部手部，脸和身体留在画外；看做事的样子可用旁观抓拍。"
-            "沿用本次用户的拍摄要求，场景与时段取自素材。")
+            "沿用本次用户的拍摄要求，场景与时段取自素材。人物入镜时，在画面描述中写明选定衣服的款式和颜色，供同一活动延续。" + CLOTHING_INSTRUCTION)
         if self.config.diary.image_character_enabled:
             text += ("同时输出 character_visible 布尔值：画面包含麦麦本人时为 true，物件或风景特写为 false。"
                      "根据本次展示要求和生活素材选择构图：看书签、饭菜等物件时聚焦物件；"
                      "看麦麦本人、做某事的样子或合照时让麦麦入镜。人物只表现素材中的活动，外貌由角色卡统一提供。")
         return text
+
+    def environment(self, category, row, now):
+        """按配图对应的经历取环境，同一活动沿用已有画面。"""
+        parts = []
+        moment = now
+        location = ""
+        if category == "experience_image":
+            event = self.store.get("experience", row["id"])
+            moment = self.engine.time(event["occurred_at"])
+            plan = self.store.find("plan", event.get("plan_id", "")) or {}
+            location = event["details"].get("地点", "") or plan.get("location", "")
+            parts.append("经历时间：" + moment.isoformat())
+            if event.get("plan_id"):
+                related = {e["id"] for e in self.store.all("experience")
+                           if e.get("plan_id") == event["plan_id"] and e["id"] != event["id"]
+                           and self.engine.visible(e, event["session_id"])
+                           and self.engine.time(e["occurred_at"]) <= moment}
+                previous = [image for image in self.store.all("experience_image")
+                            if image["id"] in related and image.get("image_file")]
+                if previous:
+                    latest = max(previous, key=lambda image: image["image_at"])
+                    parts.append("同一活动已有画面，延续其中的穿着：" + latest["image_prompt"][:600])
+        elif category == "diary_publication" and row.get("day", row["id"]) != now.date().isoformat():
+            return "回顾场景的环境和穿着取自正文及本次画面描述。"
+        if location:
+            place = next((p for p in self.store.all("place") if location in {p["id"], p["name"]}), None)
+            parts.append("经历地点：" + location[:120])
+            if place:
+                parts.append("环境：" + ("户外" if place["outdoor"] else "室内") + "；" + place["description"][:240])
+        weather = self.store.find("world", "weather") if self.config.world.weather_enabled else None
+        if weather and abs((moment - self.engine.time(weather["retrieved_at"])).total_seconds()) <= self.config.world.weather_minutes * 120:
+            current = weather["current"]
+            parts.append("所在地室外天气参考：" + json.dumps({"城市": weather["city"], "天气": weather["label"],
+                "观测时间": weather["observed_at"], "气温℃": current["temperature_2m"],
+                "体感℃": current["apparent_temperature"], "风速km/h": current["wind_speed_10m"]}, ensure_ascii=False))
+        return "\n".join(parts)
 
     def character_prompt(self, visible):
         config = self.config.diary
@@ -102,7 +141,7 @@ class DiaryImages:
         if config.image_character_appearance.strip():
             parts.append("稳定外貌：" + config.image_character_appearance.strip())
         if config.image_character_clothing.strip():
-            parts.append("常用穿着参考，按当前活动调整：" + config.image_character_clothing.strip())
+            parts.append("常用穿着参考，结合本次环境和活动调整：" + config.image_character_clothing.strip())
         return "\n".join(parts) if len(parts) > 1 else ""
 
     def put(self, category, row):
@@ -333,10 +372,14 @@ class DiaryImages:
                  "status": "失败", "error": "", "prompt_tokens": None, "completion_tokens": None,
                  "total_tokens": None, "prompt_cache_hit_tokens": None}
         try:
+            if "image_environment" not in row:
+                row["image_environment"] = self.environment(category, row, now)
+            environment = row["image_environment"]
             decide_character = (config.image_character_enabled and category != "image_test"
                                 and (bool(supplied_prompt) or "image_character_visible" not in row))
             if not prompt or decide_character:
                 instructions = self.instruction() + "正文沿用下面的内容，只补充画面描述：" + row["content"][:4000]
+                instructions += "\n环境与穿着参考：" + environment
                 if prompt:
                     instructions += "\n本次画面描述：" + prompt
                 if row.get("image_request"):
@@ -353,6 +396,7 @@ class DiaryImages:
             style = config.chat_image_style if category == "experience_image" or row.get("test_scene") else config.image_style
             character = self.character_prompt(row.get("image_character_visible", False)) if character_scene else ""
             full_prompt = prompt + ("\n" + character if character else "") + "\n画面风格：" + style
+            full_prompt += "\n穿着安排：" + CLOTHING_INSTRUCTION + "\n环境与穿着参考：" + environment
             if character_scene and row.get("image_selfie"):
                 full_prompt += "\n拍摄构图：" + SELFIE_COMPOSITION
             if row.get("image_request"):
@@ -364,7 +408,7 @@ class DiaryImages:
                 reference = self.reference_source()
                 if not reference:
                     raise ValueError("请在角色与图片页面上传参考图，或填写图片直链")
-                full_prompt += "\n人物外貌以参考图为准，包括脸部、发型、发色和眼睛；文字角色卡补充参考图未体现的细节。动作、场景和构图按本次画面描述，穿着结合当前活动。"
+                full_prompt += "\n人物外貌以参考图为准，包括脸部、发型、发色和眼睛；文字角色卡补充参考图未体现的细节。动作、场景和构图按本次画面描述，穿着采用本次画面描述和环境安排。"
             usage["task"] = self.request_endpoint(bool(reference)).lstrip("/")
             retry_count = config.image_retry_count
             for attempt in range(retry_count + 1):

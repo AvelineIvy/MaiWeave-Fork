@@ -198,9 +198,13 @@ async def test_image_style_follows_use(plugin, monkeypatch, category, expected):
         return PNG, {}
     images = p.diary_publisher.images
     monkeypatch.setattr(type(images), 'request', request)
+    if category == "experience_image":
+        images.put("experience", {"id": "style-test", "occurred_at": p.now().isoformat(), "details": {}, "session_id": "chat-test"})
     images.put(category, {"id": "style-test", "status": "草稿", "content": "窗边茶杯"})
     await images.illustrate(category, "style-test", p.now(), "窗边茶杯")
-    assert prompts == ["窗边茶杯\n画面风格：" + expected + "\n负面提示词（画面中避免）：" + p.config.diary.image_negative_prompt]
+    assert len(prompts) == 1
+    assert "画面风格：" + expected in prompts[0]
+    assert "负面提示词（画面中避免）：" + p.config.diary.image_negative_prompt in prompts[0]
 
 
 @pytest.mark.parametrize("category", ["experience_image", "diary_publication"])
@@ -213,6 +217,8 @@ async def test_missing_image_prompt_uses_selected_text_model(plugin, monkeypatch
     p.ctx.llm.generate.side_effect = None
     p.ctx.llm.generate.return_value = {"success": True, "response": json.dumps({"content": "茶杯", "image_prompt": "窗边的茶杯"})}
     images = p.diary_publisher.images
+    if category == "experience_image":
+        images.put("experience", {"id": "prompt-test", "occurred_at": p.now().isoformat(), "details": {}, "session_id": "chat-test"})
     images.put(category, {"id": "prompt-test", "status": "草稿", "content": "窗边的茶杯"})
     await images.illustrate(category, "prompt-test", p.now())
     assert p.ctx.llm.generate.call_args.kwargs["task_name"] == "prompt-task"

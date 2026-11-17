@@ -90,7 +90,7 @@ class DiaryPublisher:
                       f"日期：{day}；角色：{dump(brief(personality, 1500, 6))}；"
                       f"素材：{dump(public)}")
             if self.config.diary.image_service_enabled and self.config.diary.image_enabled:
-                result = await generate(self.ctx, self.store, self.config, "空间文案", prompt.replace("直接返回正文。", "") + self.images.instruction(), IllustratedText)
+                result = await generate(self.ctx, self.store, self.config, "空间文案", prompt.replace("直接返回正文。", "") + self.images.instruction() + "\n环境与穿着参考：" + self.images.environment("diary_publication", row, now), IllustratedText)
                 row.update(content=result.content.strip(), image_prompt=result.image_prompt, image_selfie=result.selfie, status="草稿")
                 if self.config.diary.image_character_enabled:
                     row["image_character_visible"] = result.character_visible or result.selfie

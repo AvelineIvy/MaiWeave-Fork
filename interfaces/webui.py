@@ -117,7 +117,7 @@ class WebUI:
             raise ValueError("请先保存生图配置并开启图片生成服务")
         row = {**old, "id": "latest", "status": "草稿", "content": "窗边木桌上的一杯热茶与一盆小绿植",
                "tested_model": self.config.diary.image_model, "tested_at": self.now().isoformat()}
-        for key in ("image_selfie", "image_character_visible", "test_scene"):
+        for key in ("image_selfie", "image_character_visible", "image_environment", "test_scene"):
             row.pop(key, None)
         if scene:
             framing = "前置自拍，人物看向镜头。" if scene == "自拍" else "第一人称物件近景或俯拍，物件为主体，可带入局部手部，脸和身体留在画外。"
