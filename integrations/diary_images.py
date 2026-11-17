@@ -9,7 +9,7 @@ from PIL import Image
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -17,6 +17,10 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field
 from .usage import generate
 from ..core.image_retention import ImageRetention
+
+
+class RetryableImageError(RuntimeError):
+    """生图请求遇到可重试的临时服务错误。"""
 
 
 class CharacterDraft(BaseModel):
@@ -45,6 +49,7 @@ IMAGE_INSTRUCTION = "输出 JSON：content（正文）、image_prompt（1200字�
 class DiaryImages:
     request_timeout = 180
     download_timeout = 60
+    retry_delay = 3
 
     def __init__(self, engine, context, config):
         self.store, self.ctx, self.config = engine.store, context, config
@@ -59,7 +64,7 @@ class DiaryImages:
             for category in ("diary", "diary_publication", "experience_image", "image_test"):
                 for row in self.store.all(category):
                     if row.get("image_status") == "生成中":
-                        row.update(image_status="生成失败", image_error="配图已中断，可以重新生成")
+                        row.update(image_status="生成失败", image_error="配图已中断，可以重新生成", image_progress="")
                         self.store.put(category, row)
 
     def character_settings(self):
@@ -258,7 +263,16 @@ class DiaryImages:
             with urlopen(request, timeout=self.request_timeout) as response:
                 result = json.load(response)
         except HTTPError as error:
-            raise RuntimeError(f"图片生成服务 {endpoint} 返回 HTTP {error.code}：{error.read().decode('utf-8', errors='replace')[:1000]}") from error
+            detail = error.read().decode("utf-8", errors="replace")[:1000]
+            exhausted = any(word in detail.lower() for word in ("insufficient_quota", "insufficient_balance", "quota_exceeded", "余额不足", "额度不足"))
+            kind = RetryableImageError if error.code in {429, 502, 503, 504} and not exhausted else RuntimeError
+            raise kind(f"图片生成服务 {endpoint} 返回 HTTP {error.code}：{detail}") from error
+        except (TimeoutError, ConnectionError) as error:
+            raise RetryableImageError(f"图片生成服务连接超时或中断：{error}") from error
+        except URLError as error:
+            if isinstance(error.reason, (TimeoutError, ConnectionError)):
+                raise RetryableImageError(f"图片生成服务连接超时或中断：{error.reason}") from error
+            raise
         tokens = result.get("usage", {})
         if protocol == "Unsloth 原生":
             image_id = result["images"][0]["id"]
@@ -311,7 +325,7 @@ class DiaryImages:
         prompt = supplied_prompt or row.get("image_prompt", "")
         if len(prompt) > 1200:
             raise ValueError("画面描述请控制在1200字以内")
-        row.update(image_status="生成中", image_error="")
+        row.update(image_status="生成中", image_error="", image_progress="正在生成", image_attempts=0)
         self.put(category, row)
         started = perf_counter()
         usage = {"id": uuid4().hex, "at": datetime.now(ZoneInfo(self.config.life.timezone)).isoformat(),
@@ -352,7 +366,19 @@ class DiaryImages:
                     raise ValueError("请在角色与图片页面上传参考图，或填写图片直链")
                 full_prompt += "\n人物外貌以参考图为准，包括脸部、发型、发色和眼睛；文字角色卡补充参考图未体现的细节。动作、场景和构图按本次画面描述，穿着结合当前活动。"
             usage["task"] = self.request_endpoint(bool(reference)).lstrip("/")
-            data, tokens = await asyncio.to_thread(self.request, full_prompt, reference) if reference else await asyncio.to_thread(self.request, full_prompt)
+            for attempt in range(2):
+                row["image_attempts"] = usage["attempts"] = attempt + 1
+                self.put(category, row)
+                try:
+                    data, tokens = await asyncio.to_thread(self.request, full_prompt, reference) if reference else await asyncio.to_thread(self.request, full_prompt)
+                    break
+                except RetryableImageError as error:
+                    if attempt:
+                        raise
+                    row["image_progress"] = "正在重试（第 2 次请求）"
+                    self.put(category, row)
+                    self.ctx.logger.warning("图片生成请求失败，%s 秒后重试一次：%s", self.retry_delay, error)
+                    await asyncio.sleep(self.retry_delay)
             if len(data) > self.config.retention.image_max_mb * 1024 * 1024:
                 raise ValueError("生成的图片超过配图容量上限，请调整容量设置")
             if data.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -380,6 +406,7 @@ class DiaryImages:
             usage["error"] = row["image_error"]
             raise
         finally:
+            row["image_progress"] = ""
             self.put(category, row)
             usage["seconds"] = round(perf_counter() - started, 3)
             self.put("model_usage", usage)

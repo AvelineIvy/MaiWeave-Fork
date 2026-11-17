@@ -82,8 +82,11 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         text, tone = "正在测试生图配置…", "neutral"
         if running:
             images = self.diary_publisher.images
+            result = await self.ui_image_test()
+            if result["progress"]:
+                text = result["progress"] + "…"
             seconds = int(monotonic() - self._image_test_started)
-            text += f" 已用时 {seconds} 秒 · 请求超时 {images.request_timeout} 秒；链接下载超时 {images.download_timeout} 秒"
+            text += f" 已用时 {seconds} 秒 · 每次请求超时 {images.request_timeout} 秒；链接下载超时 {images.download_timeout} 秒"
         if visible and not running:
             result = await self.ui_image_test()
             text = "测试失败：" + result["error"] if result["error"] else "测试完成：" + result["status"]

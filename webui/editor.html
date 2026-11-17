@@ -257,7 +257,7 @@ async function renderDiaryPublication(dialog,row){
   const visibility=['已发布','发布中','待核对'].includes(state.record.status)?state.record.visibility||state.visibility:state.visibility;
   status.textContent=`${state.mode} · ${visibility}可见 · ${state.record.status||'尚未生成文案'}`+(state.record.error?` · ${state.record.error}`:'')+(state.record.published_at?` · 发布时间：${state.record.published_at.replace('T',' ').slice(0,19)}`:'');
   preview.hidden=!state.image;if(state.image)preview.src=state.image;else preview.removeAttribute('src');
-  imageInfo.textContent=state.record.image_error||state.record.image_status||(state.image_service_enabled===false?'生图服务已关闭，可在模型设置开启。':state.image_enabled?'已开启自动配图。':'可以先写好文案，再生成一张配图。');
+  imageInfo.textContent=state.record.image_error||state.record.image_progress||state.record.image_status||(state.image_service_enabled===false?'生图服务已关闭，可在模型设置开启。':state.image_enabled?'已开启自动配图。':'可以先写好文案，再生成一张配图。');
   connection.textContent=state.connection.status+(state.connection.error?' · '+state.connection.error:'')+(state.connection.account?' · QQ '+state.connection.account:'');controls();
  }
  text.oninput=controls;

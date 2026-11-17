@@ -100,6 +100,7 @@ class WebUI:
         last = usages[-1] if usages else {}
         return {"enabled": self.config.diary.image_service_enabled,
                 "model": self.config.diary.image_model, "tested_model": row.get("tested_model", ""), "tested_at": row.get("tested_at", ""), "status": row.get("image_status", "尚未测试"),
+                "progress": row.get("image_progress", ""), "attempts": row.get("image_attempts", 0),
                 "error": row.get("image_error", ""), "seconds": None if row.get("image_status") == "生成中" else last.get("seconds")}
 
     @API("ui_test_image", description="使用已保存的生图配置生成测试图片")
