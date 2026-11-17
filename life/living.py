@@ -45,7 +45,11 @@ class Living:
 
     def person_key(self, session, user):
         identity = self.engine.store.find("identity", f"{session}:{user}")
-        return identity["person_id"] if identity else ""
+        if identity:
+            return identity["person_id"]
+        profile = next((p for p in self.engine.store.all("profile")
+                        if p["session_id"] == session and p["user_id"] == user and p.get("person_id")), {})
+        return profile.get("person_id", "")
 
     def intimacy(self, session, user, *, person_id=""):
         identity = person_id or self.person_key(session, user)

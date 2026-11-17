@@ -174,7 +174,8 @@ class Reviews:
                     result.update(intimacy=record["level"], relationship=record["relationship"], relationship_reason=record["reason"])
                 with p.store.db:
                     p.store.put("profile", result)
-            if action in {"edit_person", "anniversary"}:
+            relation_mode = args.get("intimacy_mode", record["existing"]["人物"].get("intimacy_mode", "auto"))
+            if action == "edit_person" or (action in {"profile", "anniversary"} and relation_mode == "auto"):
                 with p.store.db:
                     for profile in p.store.all("profile"):
                         linked = (record["person_id"] and profile.get("person_id") == record["person_id"]) or profile["id"] == args.get("profile_id")
