@@ -140,6 +140,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
             ('rhythm_details', 'rhythm', '日程与习惯参数', '设置预排范围和习惯学习所需天数。', ['horizon_days', 'learning_days', 'habit_min_days']),
             ('dream_details', 'dreams', '梦境生成条件', '设置产生梦境所需的睡眠时长。', ['minimum_hours']),
             ('followup_details', 'continuity', '事项跟进', '设置未完成事项的跟进间隔。', ['followup_hours']),
+            ('image_retry', 'diary', '图片生成重试', '调整图片服务临时失败后的重试次数。', ['image_retry_count']),
             ('retry_details', 'proactive', '交流重新判断', '设置同一话题未发出后的再次判断间隔。', ['retry_minutes']),
             ('reading_details', 'books', '自主阅读节奏', '调整每次自主阅读的时长和两次之间的间隔。', ['session_minutes', 'break_minutes']),
             ('books', 'books', '阅读与容量', '设置书架容量和每次阅读的正文长度。', ['max_books', 'storage_mb', 'max_file_mb', 'reading_chars']),
@@ -172,7 +173,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
             {"id": "context", "title": "聊天上下文", "sections": ["context"], "order": 3},
             {"id": "connections", "title": "交流与记忆", "sections": ["proactive", "limits", "quota", "memory"], "order": 4},
         ]}
-        advanced = ["planning", "world_updates", "rhythm_details", "dream_details", "followup_details", "retry_details", "reading_details", "books", "context_limits", "book_context", "retention", "plugin"]
+        advanced = ["planning", "world_updates", "rhythm_details", "dream_details", "followup_details", "retry_details", "image_retry", "reading_details", "books", "context_limits", "book_context", "retention", "plugin"]
         schema["layout"]["tabs"].extend([
             {"id": "models", "title": "模型设置", "sections": ["model_default", "model_arrangement", "model_expression", "model_information", "image_service", "image_use"], "order": 5},
             {"id": "advanced", "title": "高级设置", "sections": advanced, "order": 6},

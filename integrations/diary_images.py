@@ -366,18 +366,19 @@ class DiaryImages:
                     raise ValueError("请在角色与图片页面上传参考图，或填写图片直链")
                 full_prompt += "\n人物外貌以参考图为准，包括脸部、发型、发色和眼睛；文字角色卡补充参考图未体现的细节。动作、场景和构图按本次画面描述，穿着结合当前活动。"
             usage["task"] = self.request_endpoint(bool(reference)).lstrip("/")
-            for attempt in range(2):
+            retry_count = config.image_retry_count
+            for attempt in range(retry_count + 1):
                 row["image_attempts"] = usage["attempts"] = attempt + 1
                 self.put(category, row)
                 try:
                     data, tokens = await asyncio.to_thread(self.request, full_prompt, reference) if reference else await asyncio.to_thread(self.request, full_prompt)
                     break
                 except RetryableImageError as error:
-                    if attempt:
+                    if attempt == retry_count:
                         raise
-                    row["image_progress"] = "正在重试（第 2 次请求）"
+                    row["image_progress"] = f"正在重试（第 {attempt + 1}/{retry_count} 次，第 {attempt + 2} 次请求）"
                     self.put(category, row)
-                    self.ctx.logger.warning("图片生成请求失败，%s 秒后重试一次：%s", self.retry_delay, error)
+                    self.ctx.logger.warning("图片生成请求失败，%s 秒后重试（%s/%s）：%s", self.retry_delay, attempt + 1, retry_count, error)
                     await asyncio.sleep(self.retry_delay)
             if len(data) > self.config.retention.image_max_mb * 1024 * 1024:
                 raise ValueError("生成的图片超过配图容量上限，请调整容量设置")

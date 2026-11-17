@@ -133,6 +133,7 @@ class DiaryConfig(PluginConfigBase):
     image_enabled: bool = setting("空间随笔自动配图", default=False, description="开启图片生成服务后，为新写好的空间随笔生成一张配图；关闭此项可在详情中手动生成。聊天配图由「聊天中展示生活图片」控制。")
     image_base_url: str = setting("生图接口地址（生图必填）", default="https://api.openai.com/v1", description="填写所选图片接口的基础地址；OpenAI 与通义兼容地址通常包含 /v1，Gemini 与 DashScope 填服务根地址。")
     image_api_key: str = setting("生图 API Key（生图必填）", default="", description="填写图片生成服务提供的密钥。", json_schema_extra={"x-widget": "password", "input_type": "password"})
+    image_retry_count: int = setting("图片生成重试次数", default=3, ge=0, description="首次请求失败后最多重试的次数，默认 3 次，即最多请求 4 次；0 表示关闭自动重试。每次重试间隔 3 秒，沿用本次提示词和参考图。")
     image_model: str = setting("生图模型（生图必填）", default="gpt-image-1", description="填写服务实际支持的图片生成模型名称。每次生成一张横向 4:3、1024×768 图片。保存后可点击配置页顶部「测试生图配置」验证。")
     image_character_enabled: bool = setting("启用麦麦角色卡", default=False, description="空间和聊天共用一张角色卡，由提示词模型结合场景决定麦麦是否入镜。")
     image_reference_protocol: Literal["OpenAI 图片编辑", "通义千问兼容接口", "OpenAI Chat 生图", "Gemini 原生", "DashScope 多模态", "Unsloth 原生"] = setting("图片接口格式", default="OpenAI 图片编辑", description="按服务选择请求格式。OpenAI 与通义兼容地址通常包含 /v1；Gemini、DashScope、Unsloth 填服务根地址。Unsloth 使用服务中已加载的图片模型。DashScope 使用同步多模态生图接口。")
