@@ -150,3 +150,25 @@ async def test_profile_delete_preserves_native_person(plugin):
     assert plugin.store.find("profile", profile["id"]) is None
     assert plugin.store.find("anniversary", birthday["id"]) is None
     plugin.memory.edit_person.assert_not_awaited()
+
+
+@pytest.mark.parametrize("mode", ["auto", "manual"])
+async def test_review_identifies_bot_and_ignores_old_auto_inference(plugin, mode):
+    p = plugin
+    p.ctx.config.get.return_value = {"nickname": "测试角色", "alias_names": ["角色别名"]}
+    p.memory.person_profile = AsyncMock(return_value={"person_name": "测试用户", "profile_text": "测试用户是角色别名的男朋友", "manual_override_text": ""})
+    p.ctx.person.get_value = AsyncMock(return_value="user-a")
+    profile = p.anniversaries.save_profile("测试用户", "a", "user-a", person_id="person-a")
+    profile.update(intimacy_mode=mode, intimacy=1, relationship="朋友", relationship_reason="旧结论：不认识测试角色")
+    with p.store.db:
+        p.store.put("profile", profile)
+    decision(p, level=3)
+    result = await p.reviews.submit("profile", {"profile_id":profile["id"], "person_id":"person-a", "session_id":"a", "intimacy_mode":mode, "intimacy":1, "relationship":"朋友"})
+    prompt = p.ctx.llm.generate.call_args.args[0]
+    assert '"昵称": "测试角色"' in prompt and '"别名": ["角色别名"]' in prompt
+    assert '"姓名": "测试用户"' in prompt
+    assert "旧结论：不认识测试角色" not in prompt
+    assert ('"intimacy": 1' in prompt) == (mode == "manual")
+    assert result["existing"]["人物"]["relationship_reason"] == "旧结论：不认识测试角色"
+    saved = p.store.get("profile", profile["id"])
+    assert (saved["relationship"], saved["intimacy"]) == (("恋人", 3) if mode == "auto" else ("朋友", 1))

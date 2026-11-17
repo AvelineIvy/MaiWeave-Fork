@@ -88,6 +88,17 @@ class Reviews:
                 payload = event
             record["person_id"] = person_id
             record["existing"] = {"人物": profile, "纪念日": dates, "原生记忆": native}
+            assessment_existing = dict(record["existing"])
+            assessed_profile = {key: value for key, value in profile.items() if key != "relationship_reason"}
+            if payload.get("intimacy_mode", profile.get("intimacy_mode", "auto")) == "auto":
+                for key in ("relationship", "intimacy"):
+                    assessed_profile.pop(key, None)
+            assessment_existing["人物"] = assessed_profile
+            participants = {}
+            if record["action"] != "sync":
+                bot = await p.ctx.config.get("bot")
+                participants = {"机器人": {"昵称": bot.get("nickname", ""), "别名": bot.get("alias_names", [])},
+                                "档案对象": {"姓名": native.get("name") or identity.get("name", ""), "person_id": person_id}}
             scope = {"delete_profile": "删除范围是本插件指定个人资料及其关联生日、纪念日；原生人物画像与记忆继续保留。",
                      "delete_anniversary": "删除范围是指定的一条生日或纪念日；个人资料与原生记忆继续保留。"}.get(record["action"], "")
             prompt = (
@@ -95,11 +106,13 @@ class Reviews:
                 "conflicts 的每项是字符串，例如[\"生日与已有记录不同\"]。"
                 "relationship 从普通关系、朋友、好友、家人、恋人、伴侣、前任中选一项，表示关系身份；"
                 "level（0普通、1熟悉、2亲近、3亲密）表示亲密程度，reason 为判断依据。"
-                "intimacy_mode 为 auto 时，根据已有画像与互动推断关系和等级；新增档案的姓名沿用所选画像。"
+                "判断的是机器人与档案对象之间的关系；机器人昵称和别名指向同一角色，档案对象对应所选人物画像。"
+                "intimacy_mode 为 auto 时，从原生画像与相处事实重新评估关系和等级；manual 时沿用用户设置。新增档案的姓名沿用所选画像。"
                 "比较同一人物、同一事件的日期、身份和事实。明确改正已有值也列出差异，交由用户确认。"
                 "区分公历农历、不同纪念日、转述和用户自己的信息。关系结合主体、时间和语境理解，"
-                "现任恋人可为亲密关系；前任、别人的恋人和引用的话按实际主体判断。删除有内容的记录时列出将删除的内容。"
-                f"操作：{record['action']}；操作范围：{scope}；已有：{json.dumps(record['existing'], ensure_ascii=False)}；新内容：{json.dumps(payload, ensure_ascii=False)}"
+                "画像明确记载档案对象是机器人的现任男朋友、女朋友或情侣时，关系身份为恋人、亲密程度为3；配偶或伴侣归为伴侣。"
+                "前任、档案对象与第三人的关系和引用的话，按各自的主体与时间理解。删除有内容的记录时列出将删除的内容。"
+                f"双方身份：{json.dumps(participants, ensure_ascii=False)}；操作：{record['action']}；操作范围：{scope}；已有：{json.dumps(assessment_existing, ensure_ascii=False)}；新内容：{json.dumps(payload, ensure_ascii=False)}"
             )
             record["phase"] = "模型正在核对经历与原生记忆是否冲突…" if record["action"] == "sync" else "模型正在核对资料冲突与亲密关系…"
             with p.store.db:
