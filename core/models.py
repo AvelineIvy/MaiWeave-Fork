@@ -176,6 +176,7 @@ class ActivityMeaning(BaseModel):
 
 
 class ActivityOutcome(ActivityMeaning, SharingScore):
+    new_followup: str = Field(default="", max_length=300, description="上一件已收尾的事接着办完后，本次新发现的下一件事")
     next_date: date | None = None
     summary: str = Field(min_length=1, max_length=1500)
     details: dict[str, str]
@@ -210,3 +211,14 @@ class ShareDecision(BaseModel):
     image: bool = False
     candidate: int = Field(default=1, ge=1, le=3, description="所选候选的序号，单条候选为1")
     reason: str = Field(min_length=1, max_length=300)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_decision(cls, value):
+        if isinstance(value, dict):
+            value = dict(value)
+            if value.get("send") is False:
+                value.pop("candidate", None)
+            if isinstance(value.get("reason"), str):
+                value["reason"] = value["reason"].strip()[:300]
+        return value

@@ -15,6 +15,7 @@ from .anniversaries import Anniversaries
 from .greetings import Greetings
 from .presence import Presence
 from ..integrations.usage import generate
+from ..integrations.chat_context import brief, select_fields
 from ..integrations.share_receipts import ShareReceipts
 
 
@@ -520,9 +521,20 @@ class Living:
         if habit and habit["kind"] == "sleep" and not config.schedule_enabled:
             habit = None
         next_step = self.continuity.next_step()
-        arranged = {p.get("continuation_id") for p in engine.store.all("plan")
+        linked = [p for p in engine.store.all("plan", omit=("changes",)) if p.get("continuation_id")]
+        arranged = {p["continuation_id"] for p in linked
                     if p["status"] in {"scheduled", "active", "paused", "blocked", "awaiting_confirmation"}}
+        used = {(p["continuation_id"], p["continuation_experience_id"]) for p in linked
+                if p["status"] == "completed" and p.get("continuation_experience_id")}
+        for plan in linked:
+            if plan["status"] == "completed" and not plan.get("continuation_experience_id"):
+                memory = engine.store.find("activity_memory", plan["continuation_id"])
+                if (memory and memory.get("experience_id") != plan.get("experience_id")
+                        and engine.time(memory["updated_at"]) <= engine.time(plan["end"])):
+                    used.add((memory["id"], memory.get("experience_id")))
         continuations = [r for r in engine.store.all("activity_memory") if r["next_action"] and r["id"] not in arranged
+                         and (r["id"], r.get("experience_id")) not in used
+                         and not (r.get("completed") and r["next_action"] == r.get("details", {}).get("接续缘由"))
                          and r.get("kind") in {"study", "work", "leisure", "rest", "cook", "meal", "social"}
                          and (not r.get("next_date") or r["next_date"] <= now.date().isoformat())]
         continuations = sorted(continuations, key=lambda row: engine.time(row["updated_at"]))[-12:]
@@ -539,7 +551,7 @@ class Living:
         else:
             source = "身体需要 · 用餐" if state["hunger"] >= 65 else "模型自主选择"
             balance = self.activity_balance(now)
-            goals = [g for g in engine.store.all("goal") if g["status"] == "active"]
+            goals = [select_fields(g, ("id", "title", "completed_sessions", "target_sessions")) for g in engine.store.all("goal") if g["status"] == "active"]
             completed = sorted((p for p in engine.store.all("plan") if p["status"] == "completed"),
                                key=lambda p: engine.time(p["end"]), reverse=True)
             window = now - timedelta(hours=2)
@@ -548,9 +560,23 @@ class Living:
             reading_minutes = round(reading_seconds / 60)
             last_meal = next((engine.time(p["end"]).strftime("%m-%d %H:%M") for p in completed if p["kind"] == "meal"), "暂无记录")
             personality = await self.ctx.config.get("personality")
+            if isinstance(personality, dict):
+                personality = select_fields(personality, ("personality", "behavior_style"))
             recent = [{"summary": e["summary"], "source": e["source"]} for e in engine.store.all("experience")[-8:]]
             environment = self.world.context(now)
-            places = self.world.planning_places()
+            weather = environment["weather"] or {}
+            environment = {"weather": select_fields(weather, ("city", "label", "current", "observed_at", "stale", "outdoor_suitable")),
+                           "news": [select_fields(r, ("title", "published_at")) for r in environment["news"]],
+                           "readings": [brief(select_fields(r, ("title", "content")), 160, 2) for r in environment["readings"]]}
+            places = [select_fields(p, ("name", "category")) for p in self.world.planning_places()]
+            context = self.continuity.context("", now)
+            influences = {key: [select_fields(r, fields) for r in rows] for key, fields, rows in (
+                ("preferences", ("activity", "score"), sorted(context["preferences"], key=lambda r: abs(r["score"]), reverse=True)[:8]),
+                ("threads", ("title", "due_at"), sorted(context["threads"], key=lambda r: r["due_at"])[:6]),
+                ("effects", ("reason", "mood", "stress"), context["effects"][-6:]))}
+            candidates = [select_fields(r, ("id", "activity", "subject", "next_action", "next_date", "location", "completed")) for r in continuations]
+            step = {"goal_id": next_step[0]["id"], **select_fields(next_step[1], ("id", "title", "criterion", "minutes", "kind"))} if next_step else None
+            habit = select_fields(habit or {}, ("title", "location", "kind", "minute"))
             prompt = (
                 "为角色选择接下来独自进行的一件小活动，输出 JSON 对象。"
                 "根据人格、兴趣、精力和长期目标，在角色的生活空间中安排活动。"
@@ -570,8 +596,8 @@ class Living:
                 "motivation 简短说明这次继续或切换的具体理由。"
                 "时长按这次想完成的小事选择：随手收拾、坐一会儿可用10至20分钟；读一段、做一道菜按内容与空档安排。"
                 "疲惫或兴趣一般时选短一点，有具体兴致时可多留些时间。空闲也可以安静歇一会儿。"
-                f"此刻的习惯候选：{json.dumps(habit, ensure_ascii=False)}；目标下一步：{json.dumps(next_step, ensure_ascii=False)}；"
-                f"可接续的具体念头：{json.dumps(continuations, ensure_ascii=False)}。"
+                f"此刻的习惯候选：{json.dumps(habit, ensure_ascii=False)}；目标下一步：{json.dumps(step, ensure_ascii=False)}；"
+                f"可接续的具体念头：{json.dumps(candidates, ensure_ascii=False)}。"
                 "选择接续时填写 continuation_id，并在活动里回应该念头；选择目标时填写 goal_id 和 goal_step_id。"
                 "接续可以换一种活动：做饭发现调料快用完，下次顺路买；散步看到想再去的店，合适时再逛。依据保存的具体经历安排，motivation说清这次与上次的联系。"
                 "已经安排在日程中的事按原安排进行。完成一件小事后，可以换个活动，也可以就此休息。"
@@ -581,8 +607,8 @@ class Living:
                 f"兴趣：{config.interests}；状态：{json.dumps(state, ensure_ascii=False)}；"
                 "hunger 是饥饿程度，0表示不饿、100表示非常饿，数值越大越饿；达到65时这轮选择cook或meal，先解决用餐。"
                 f"聊天中确定的角色安排：{json.dumps(self.continuity.chat_arrangements(now), ensure_ascii=False)}；有效时段内按约定选择活动，blocked_kinds列出的类别留到该时段结束后。"
-                f"目标：{json.dumps(goals, ensure_ascii=False)}；最近经历：{json.dumps(recent, ensure_ascii=False)}"
-                f"；持续影响、偏好和接续内容：{json.dumps(self.continuity.context('', now), ensure_ascii=False)}"
+                f"目标：{json.dumps(goals, ensure_ascii=False)}；最近经历：{json.dumps(brief(recent, 160, 8), ensure_ascii=False)}"
+                f"；持续影响与偏好：{json.dumps(influences, ensure_ascii=False)}"
                 "location 填已有地点名称；想去的新场所用 place_query 填简短稳定的地点搜索词，location 可留空。"
                 "同类需求复用相同搜索词，例如咖啡馆、东北菜餐厅、安静的咖啡馆；保留菜系、环境等具体要求。"
                 "根据本次活动决定是否需要新地点，例如喝咖啡找咖啡馆、吃饭找餐厅、购物找商场，类别自由选择。"

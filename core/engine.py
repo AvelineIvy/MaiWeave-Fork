@@ -144,6 +144,8 @@ class LifeEngine:
                 "start": start.isoformat(), "end": end.isoformat(), "status": "scheduled",
                 "autonomous": autonomous, "flexible": value.flexible or autonomous,
                 "elapsed_seconds": 0, "created_at": now.isoformat(), "changes": []}
+        if value.continuation_id:
+            plan["continuation_experience_id"] = self.store.get("activity_memory", value.continuation_id).get("experience_id", "")
         with self.store.db:
             self.store.put("plan", plan)
         return plan
@@ -248,9 +250,9 @@ class LifeEngine:
         with self.store.db:
             self.store.put("experience", record)
             for memory in self.store.all("activity_memory"):
-                if memory["experience_id"] == record_id:
+                if memory.get("experience_id") == record_id:
                     memory.update(details=dict(record["details"]), updated_at=now.isoformat())
-                    if "进度" in details:
+                    if "进度" in details and not memory.get("completed"):
                         memory["next_action"] = "从更新后的进度继续：" + details["进度"]
                     self.store.put("activity_memory", memory)
         return record

@@ -64,7 +64,7 @@ class ShareReceipts:
     async def decide(self, session, intents, now, config, recipient=None):
         recipient = recipient or {"场景": "私聊"}
         guide = (
-            "判断这次生活经历是否值得现在主动告诉对方，从候选里选一件或等待，输出JSON：send（布尔值）、candidate（候选序号，从1开始）、reason（中文原因）。"
+            "判断这次生活经历是否值得现在主动告诉对方，输出JSON。发送时send=true，candidate填候选序号（从1开始）；等待时send=false，省略candidate。reason用一句中文说明，最多300字。"
             "结合人物画像中的明确兴趣、关系和当前聊天判断话题是否适合这个对象。亲近的人可以分享日常小事；"
             "普通、熟悉关系更看重共同兴趣、关心的进展或新发现；亲近、亲密关系也可以因为日常感受、小进展而想联系。兴趣未知时参考当前对话。"
             "明确期待的后续优先于笼统兴趣；偶尔提起的话题按当次交流理解。画像中的近期互动、推测和稳定兴趣分别理解。"

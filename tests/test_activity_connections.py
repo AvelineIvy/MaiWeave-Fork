@@ -106,6 +106,44 @@ async def test_plain_activity_can_end_without_new_task(plugin):
     assert "顺利收尾时填空字符串" in plugin.ctx.llm.generate.call_args.args[0]
 
 
+@pytest.mark.parametrize("status,legacy,available", [
+    ("completed", False, False), ("completed", True, False), ("cancelled", False, True)])
+async def test_followup_before_reflection(plugin, status, legacy, available):
+    now = plugin.now().replace(hour=12, minute=0, second=0, microsecond=0)
+    set_time(plugin, now)
+    memory = {"id": "pantry", "session_id": "", "subject": "冰箱", "activity": "整理",
+              "kind": "leisure", "next_action": "检查剩下的食材", "completed": True,
+              "updated_at": now.isoformat(), "experience_id": "original"}
+    with plugin.store.db:
+        plugin.store.put("activity_memory", memory)
+    end = now + timedelta(minutes=10)
+    plan = plugin.engine.create_plan(PlanInput(title="检查食材", continuation_id="pantry",
+        start=now.isoformat(), end=end.isoformat()), "", now)
+    if legacy:
+        plan.pop("continuation_experience_id")
+        with plugin.store.db:
+            plugin.store.put("plan", plan)
+    if status == "cancelled":
+        plugin.engine.transition(plan["id"], "cancel", "", now)
+    plugin.engine.advance(end)
+    plugin.config.life.schedule_enabled = False
+    plugin.config.life.autonomous = True
+    plugin.ctx.config.get.return_value = {"personality": "现用人设", "profiles": ["曾用人设"]}
+    plugin.ctx.llm.generate.return_value = {"success": True, "response": json.dumps(
+        {"title": "听歌", "kind": "rest", "minutes": 10, "location": "住处", "motivation": "休息"})}
+    await plugin.living.choose_activity(end)
+    prompt = plugin.ctx.llm.generate.await_args.args[0]
+    assert prompt.count(memory["next_action"]) == int(available)
+    assert "现用人设" in prompt and "曾用人设" not in prompt
+    if status == "completed":
+        result(plugin, "整理", "冰箱", "已经检查完食材", "下次再确认一遍冰箱里还有什么")
+        await plugin.continuity.reflect(plan["id"], end)
+        saved = plugin.store.get("activity_memory", "pantry")
+        assert saved["next_action"] == ""
+        plugin.engine.revise_experience(saved["experience_id"], {"进度": "食材清点完毕"}, "", "补充清点结果", "", end)
+        assert plugin.store.get("activity_memory", "pantry")["next_action"] == ""
+
+
 async def test_book_reading_completes_saved_intention(plugin):
     now=plugin.now().replace(hour=12,minute=0,second=0,microsecond=0)
     set_time(plugin,now)
