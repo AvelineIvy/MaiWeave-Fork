@@ -105,6 +105,7 @@ def test_all_page_bindings_match_real_registered_api():
     pages = json.loads(raw)["pages"]
     assert len(pages) == 11
     for page in pages:
+        assert len(page["queries"]) <= 10
         for binding in [*page["queries"].values(), *page["actions"].values()]:
             assert "required" not in binding
             component = components[binding["api"]]

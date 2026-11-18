@@ -19,7 +19,7 @@ def setting(label: str, **kwargs):
 
 class PluginSection(PluginConfigBase):
     __ui_label__ = "插件信息"
-    config_version: str = setting("配置版本", default="0.12.0", description="配置结构变更时更新。当前安装的插件版本见页面顶部。", json_schema_extra={"disabled": True})
+    config_version: str = setting("配置版本", default="0.12.1", description="配置结构变更时更新。当前安装的插件版本见页面顶部。", json_schema_extra={"disabled": True})
 
 
 class LifeConfig(PluginConfigBase):
@@ -73,8 +73,10 @@ class WorldConfig(PluginConfigBase):
     """天气填写城市即可使用；资讯订阅和联网搜索按需开启。"""
 
     __ui_label__ = "天气与外部世界"
-    weather_enabled: bool = setting("启用实时天气", default=True, description="使用 Open-Meteo 实时天气数据")
+    weather_enabled: bool = setting("启用实时天气", default=True, description="按所选来源更新生活城市的天气")
     search_enabled: bool = setting("启用 MaiBot 联网搜索", default=False, description="控制地点搜索、联网检索和网页读取；服务在 MaiBot「模型管理 → 功能分配 → 联网搜索」选择。")
+    weather_provider: Literal["Open-Meteo", "心知天气"] = setting("天气来源", default="Open-Meteo", description="Open-Meteo 直接使用；心知天气需填写 API 密钥。")
+    weather_api_key: str = setting("心知天气 API 密钥（选择心知时必填）", default="", description="在心知天气控制台申请免费版，填写 API 密钥中的私钥。", json_schema_extra={"x-widget": "password", "input_type": "password"})
     city: str = setting("天气城市（使用天气时必填）", default="大庆", description="角色生活所在城市，天气和地点搜索共用此项。", json_schema_extra={"placeholder": "例如：大庆"})
     country_code: str = setting("国家或地区代码（选填）", default="CN", description="有同名城市时可以补充：中国填 CN，日本填 JP；选填。", json_schema_extra={"placeholder": "例如：CN"})
     places_enabled: bool = setting("按城市自动搜索生活地点", default=False, description="自主规划按活动需求搜索当地场所，如餐厅、咖啡馆或商场；已有合适地点可直接复用；新搜索需要开启 MaiBot 联网搜索总开关。")

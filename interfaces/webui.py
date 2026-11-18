@@ -155,6 +155,14 @@ class WebUI:
                            "image": await asyncio.to_thread(self.life_images.images.preview, row, 256)} for row in reversed(rows)],
                 "deliveries": list(reversed(self.store.all("image_delivery")[-20:]))}
 
+    @API("ui_record_support", description="读取经历页的数据保留或图片记录")
+    async def ui_record_support(self, section: str) -> dict:
+        if section == "images":
+            return await self.ui_life_images()
+        if section == "retention":
+            return await self.ui_retention()
+        raise ValueError("请选择 retention 或 images")
+
     @API("ui_retention", description="预览数据保留与预计清理数量")
     async def ui_retention(self) -> dict:
         return self.retention.preview(self.now())
@@ -705,7 +713,7 @@ class WebUI:
                 "search_enabled": search["ready"],
                 "search_status": search["summary"],
                 "observed_at": display_time(weather["observed_at"]) if weather else "—",
-                "source": "Open-Meteo", "forecast": weather["forecast"] if weather else [],
+                "source": weather["source"] if weather else self.config.world.weather_provider, "forecast": weather["forecast"] if weather else [],
                 "weather_error": status["error"] if status and status["error"] else "无",
                 "exploration_status": f"{exploration['reason']} · 今日 {exploration['used']}/{exploration['limit']} 次",
                 "statuses": self.store.all("world_status"), **{key: value["items"] for key, value in tables.items()},

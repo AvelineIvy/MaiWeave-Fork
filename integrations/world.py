@@ -152,14 +152,16 @@ class World:
         cfg, store = self.config.world, self.engine.store
         jobs = []
         errors = []
-        weather_place = store.find("world", "weather_place")
-        city_changed = not weather_place or weather_place["query"] != cfg.city + "|" + cfg.country_code
+        weather_status = store.find("world_status", "weather") or {}
+        city_changed = weather_status.get("query") != self.weather_identity()
         if cfg.weather_enabled and cfg.city and (city_changed or self.due("weather", now, cfg.weather_minutes, force)):
             jobs.append(("weather", self.weather))
         if cfg.news_enabled and cfg.feed_urls and self.due("news", now, cfg.news_minutes, force):
             jobs.append(("news", self.news))
         for key, method in jobs:
             status = {"id": key, "attempted_at": now.isoformat(), "status": "更新中", "error": ""}
+            if key == "weather":
+                status["query"] = self.weather_identity()
             with store.db:
                 store.put("world_status", status)
             try:
@@ -174,10 +176,16 @@ class World:
         if errors:
             raise RuntimeError("；".join(errors))
 
+    def weather_identity(self):
+        cfg = self.config.world
+        return "|".join((cfg.weather_provider, cfg.city, cfg.country_code))
+
     async def weather(self, now):
         cfg = self.config.world
         if not cfg.city:
             raise ValueError("请先在配置页填写天气城市")
+        if cfg.weather_provider == "心知天气":
+            return await self.seniverse_weather(now)
         place = self.engine.store.find("world", "weather_place")
         identity = cfg.city + "|" + cfg.country_code
         if not place or place["query"] != identity:
@@ -202,11 +210,56 @@ class World:
                      "high": daily["temperature_2m_max"][i], "low": daily["temperature_2m_min"][i],
                      "rain_probability": daily["precipitation_probability_max"][i],
                      "sunrise": daily["sunrise"][i], "sunset": daily["sunset"][i]} for i, day in enumerate(daily["time"])]
-        result = {"id": "weather", "city": place["name"], "region": place.get("admin1", ""),
+        result = {"id": "weather", "query": self.weather_identity(), "city": place["name"], "region": place.get("admin1", ""),
                   "latitude": place["latitude"], "longitude": place["longitude"], "current": current,
                   "label": weather_label(current["weather_code"]), "forecast": forecast,
                   "observed_at": current["time"], "retrieved_at": now.isoformat(), "source": "Open-Meteo", "url": url,
                   "outdoor_suitable": current["precipitation"] == 0 and current["wind_speed_10m"] < 40 and -5 < current["apparent_temperature"] < 35}
+        with self.engine.store.db:
+            self.engine.store.put("world", result)
+        return result
+
+    async def seniverse_weather(self, now):
+        cfg = self.config.world
+        if not cfg.weather_api_key.strip():
+            raise ValueError("请在实时天气设置中填写心知天气 API 密钥")
+        query = {"key": cfg.weather_api_key.strip(), "location": cfg.city, "language": "zh-Hans", "unit": "c"}
+        base = "https://api.seniverse.com/v3/weather/"
+
+        async def fetch(endpoint, **extra):
+            try:
+                raw = json.loads(await asyncio.to_thread(download, base + endpoint + "?" + urlencode({**query, **extra})))
+            except HTTPError as error:
+                detail = json.loads(error.read())
+                raise ValueError(f"心知天气：{detail.get('status', '请求失败')}（{detail.get('status_code', error.code)}）") from None
+            return raw["results"][0]
+
+        observation = await fetch("now.json")
+        # 免费版提供气温和天气现象；其余观测字段按服务返回值保存。
+        data = observation["now"]
+        def number(key):
+            value = data.get(key)
+            return float(value) if value not in (None, "") else None
+        temperature, feels, wind = number("temperature"), number("feels_like"), number("wind_speed")
+        code = int(data["code"])
+        current = {"time": observation["last_update"], "temperature_2m": temperature,
+                   "apparent_temperature": feels, "wind_speed_10m": wind,
+                   "relative_humidity_2m": number("humidity")}
+        location = observation["location"]
+        result = {"id": "weather", "query": self.weather_identity(), "city": location["name"],
+                  "region": location["path"], "current": current, "label": data["text"], "forecast": [],
+                  "observed_at": observation["last_update"], "retrieved_at": now.isoformat(),
+                  "source": "心知天气", "url": base + "now.json",
+                  "outdoor_suitable": code in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9} and
+                      -5 < (feels if feels is not None else temperature) < 35 and (wind is None or wind < 40)}
+        # 实况已成功时先保存，预报失败仍可使用本次气温与天气。
+        with self.engine.store.db:
+            self.engine.store.put("world", result)
+        prediction = await fetch("daily.json", start=0, days=3)
+        result["forecast"] = [{"day": day["date"], "weather": day["text_day"],
+                               "high": float(day["high"]), "low": float(day["low"]),
+                               "rain_probability": None, "sunrise": None, "sunset": None}
+                              for day in prediction["daily"]]
         with self.engine.store.db:
             self.engine.store.put("world", result)
         return result
@@ -432,6 +485,9 @@ class World:
 
     def context(self, now):
         weather = self.engine.store.find("world", "weather")
+        if weather and (weather["source"] != self.config.world.weather_provider or
+                        weather.get("query", self.weather_identity()) != self.weather_identity()):
+            weather = None
         if weather:
             weather = dict(weather)
             weather["stale"] = (now - self.engine.time(weather["retrieved_at"])).total_seconds() > self.config.world.weather_minutes * 120

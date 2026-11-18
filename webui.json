@@ -829,14 +829,15 @@
             }
           }
         },
-        "retention": {
-          "api": "ui_retention",
-          "version": "1"
-        },
-        "life_images": {
-          "api": "ui_life_images",
-          "parameters": {},
-          "version": "1"
+        "record_support": {
+          "api": "ui_record_support",
+          "version": "1",
+          "parameters": {
+            "section": {
+              "type": "string",
+              "required": true
+            }
+          }
         }
       },
       "actions": {

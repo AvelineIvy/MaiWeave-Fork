@@ -60,6 +60,9 @@ def operation(function):
 class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
     config_model = MaiWeaveConfig
     model_tasks = ["utils"]
+    worker = None
+    store = None
+    memory = None
 
     config_widgets = [
         ConfigWidget(id="image_settings_guide", kind="status", label="图片生成服务"),
@@ -115,7 +118,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
             ("sleep", "life", "日常作息", "关闭作息可全天候交流；开启后按 24 小时制安排睡眠。", ["schedule_enabled", "nap_quiet", "sleep_hour", "wake_hour"]),
             ("wake", "life", "睡眠唤醒", "设置私聊唤醒概率、唤醒词语和醒来后留给聊天的时间。", ["wake_enabled", "private_wake_probability", "wake_minutes", "wake_keywords"]),
             ("planning", "life", "更新与规划", "设置生活推进和自主规划的检查间隔。", ["tick_seconds", "planning_interval_minutes"]),
-            ("weather", "world", "实时天气", "填写城市，查看当地天气和预报。", ["weather_enabled", "city", "country_code"]),
+            ("weather", "world", "实时天气", "填写城市，查看当地天气和预报。", ["weather_enabled", "weather_provider", "weather_api_key", "city", "country_code"]),
             ("explore", "world", "自主见闻", "安排时间了解感兴趣的事，再把发现带回生活。", ["explore_enabled", "explore_topics", "explore_daily_limit", "explore_interval_minutes"]),
             ("news", "world", "资讯订阅", "按需开启；订阅地址需要自行提供。", ["news_enabled", "feed_urls"]),
             ("search", "world", "联网搜索", "复用 MaiBot 已配置的搜索服务。", ["search_enabled", "places_enabled"]),
@@ -232,18 +235,25 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         self.ctx.logger.info("MaiWeave 已加载")
 
     async def on_unload(self):
-        self.worker.cancel()
-        with suppress(asyncio.CancelledError):
-            await self.worker
-        for task in self.jobs:
+        if self.worker is not None:
+            self.worker.cancel()
+            with suppress(asyncio.CancelledError):
+                await self.worker
+            self.worker = None
+        jobs = getattr(self, "jobs", set())
+        for task in jobs:
             task.cancel()
-        await asyncio.gather(*self.jobs, return_exceptions=True)
+        await asyncio.gather(*jobs, return_exceptions=True)
         try:
-            await asyncio.to_thread(self.memory.close)
+            if self.memory is not None:
+                await asyncio.to_thread(self.memory.close)
+                self.memory = None
         except (OSError, ValueError) as error:
             self.ctx.logger.warning("释放原生记忆登录会话失败：%s", error)
         finally:
-            self.store.close()
+            if self.store is not None:
+                self.store.close()
+                self.store = None
 
     async def on_config_update(self, scope: str, config_data: dict, version: str):
         if scope == "self":
@@ -655,7 +665,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         activity = current["title"] if current and self.engine.visible(current, session) else "正在处理其他安排" if current else "空闲"
         state = self.engine.state()
         message = (
-            f"MaiWeave 0.12.0\n启用：{self.config.life.enabled}\n当前：{activity}\n"
+            f"MaiWeave 0.12.1\n启用：{self.config.life.enabled}\n当前：{activity}\n"
             f"精力：{state['energy']:.0f}；饥饿：{state['hunger']:.0f}；心情：{state['mood']:.0f}\n"
             f"聊天流：{session}\n原生记忆连接：{'已配置' if self.config.memory.enabled else '未配置'}\n"
             f"最近运行错误：{self.last_error or '无'}"

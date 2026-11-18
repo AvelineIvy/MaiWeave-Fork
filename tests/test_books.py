@@ -191,7 +191,7 @@ async def test_reading_place_travel_and_weather_continuation(plugin):
     plan = plugin.store.get('plan', plan['id'])
     with plugin.store.db:
         plugin.store.put('plan', {**plan, 'flexible': True})
-        plugin.store.put('world', {'id': 'weather', 'city': '大庆', 'label': '降雨', 'outdoor_suitable': False, 'retrieved_at': arrived.isoformat()})
+        plugin.store.put('world', {'id': 'weather', 'source': 'Open-Meteo', 'city': '大庆', 'label': '降雨', 'outdoor_suitable': False, 'retrieved_at': arrived.isoformat()})
     plugin.living.adjust(arrived)
     changed = plugin.store.get('plan', plan['id'])
     assert changed['location'] == '住处' and changed['book_id'] == book['id']

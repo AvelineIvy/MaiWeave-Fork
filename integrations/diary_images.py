@@ -126,11 +126,14 @@ class DiaryImages:
             if place:
                 parts.append("环境：" + ("户外" if place["outdoor"] else "室内") + "；" + place["description"][:240])
         weather = self.store.find("world", "weather") if self.config.world.weather_enabled else None
+        identity = "|".join((self.config.world.weather_provider, self.config.world.city, self.config.world.country_code))
+        if weather and (weather.get("source", "Open-Meteo") != self.config.world.weather_provider or weather.get("query", identity) != identity):
+            weather = None
         if weather and abs((moment - self.engine.time(weather["retrieved_at"])).total_seconds()) <= self.config.world.weather_minutes * 120:
             current = weather["current"]
             parts.append("所在地室外天气参考：" + json.dumps({"城市": weather["city"], "天气": weather["label"],
                 "观测时间": weather["observed_at"], "气温℃": current["temperature_2m"],
-                "体感℃": current["apparent_temperature"], "风速km/h": current["wind_speed_10m"]}, ensure_ascii=False))
+                "体感℃": current.get("apparent_temperature"), "风速km/h": current.get("wind_speed_10m")}, ensure_ascii=False))
         return "\n".join(parts)
 
     def character_prompt(self, visible):

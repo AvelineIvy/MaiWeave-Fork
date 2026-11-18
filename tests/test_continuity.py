@@ -193,7 +193,7 @@ def test_bad_weather_changes_flexible_activity_but_keeps_commitment(life):
     a = x.spatial.schedule(PlanInput(title="散步", start=(x.now + timedelta(hours=1)).isoformat(), end=(x.now + timedelta(hours=2)).isoformat(), location="公园"), "", x.now, autonomous=True)
     b = x.spatial.schedule(PlanInput(title="约好见面", start=(x.now + timedelta(hours=3)).isoformat(), end=(x.now + timedelta(hours=4)).isoformat(), location="公园", participants=["用户"]), "a", x.now)
     with x.store.db:
-        x.store.put("world", {"id": "weather", "city": "上海", "label": "雷暴", "outdoor_suitable": False, "retrieved_at": x.now.isoformat()})
+        x.store.put("world", {"id": "weather", "source": "Open-Meteo", "city": "上海", "label": "雷暴", "outdoor_suitable": False, "retrieved_at": x.now.isoformat()})
     service.adjust(x.now)
     assert x.store.get("plan", a["id"])["location"] == "住处"
     assert x.store.get("plan", b["id"])["location"] == "公园"

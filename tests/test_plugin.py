@@ -273,3 +273,25 @@ async def test_model_task_dropdown_uses_host_tasks_and_keeps_selection(plugin):
     plugin.ctx.llm.generate.return_value = {"success": True, "response": "已完成"}
     await generate(plugin.ctx, plugin.store, plugin.config, "测试任务选择", "测试")
     assert plugin.ctx.llm.generate.call_args.kwargs["task_name"] == "planner"
+
+
+async def test_unload_before_load():
+    instance = create_plugin()
+    await instance.on_unload()
+
+
+async def test_unload_after_partial_load(tmp_path, monkeypatch):
+    instance = create_plugin()
+    instance.set_plugin_config(MaiWeaveConfig().model_dump())
+    instance._set_context(SimpleNamespace(paths=SimpleNamespace(data_dir=str(tmp_path)),
+        llm=SimpleNamespace(get_available_models=AsyncMock(return_value=["utils"]))))
+    def fail(*args):
+        raise ValueError("初始化测试失败")
+    monkeypatch.setattr("maiweave.plugin.Anniversaries", fail)
+    with pytest.raises(ValueError, match="初始化测试失败"):
+        await instance.on_load()
+    db = instance.store.db
+    await instance.on_unload()
+    import sqlite3
+    with pytest.raises(sqlite3.ProgrammingError):
+        db.execute("SELECT 1")
