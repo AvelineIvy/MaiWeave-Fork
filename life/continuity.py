@@ -241,7 +241,7 @@ class Continuity:
         if expires <= due or expires <= now:
             raise ValueError("跟进截止时间应晚于跟进时间和当前时间")
         old = self.engine.owned("thread", thread_id, session) if thread_id else None
-        record = {"id": thread_id or uid(), "session_id": session, "title": title, "context": context,
+        record = {**(old or {}), "id": thread_id or uid(), "session_id": session, "title": title, "context": context,
                   "due_at": due.isoformat(), "created_at": old["created_at"] if old else now.isoformat(),
                   "status": "open", "source_ref": source_ref or (old or {}).get("source_ref", ""), "requested_at": "",
                   "expires_at": expires.isoformat(), "updated_at": now.isoformat()}
@@ -249,10 +249,59 @@ class Continuity:
             self.engine.store.put("thread", record)
         return record
 
+    def plan_promise(self, value, session, now, spoken=""):
+        plan = self.engine.owned("plan", value.plan_id, session)
+        ref = f"plan:{plan['id']}:{value.when}"
+        old = next((r for r in self.engine.store.all("thread") if r["session_id"] == session and r["source_ref"] == ref), None)
+        if value.action == "answered":
+            if old and old["status"] == "open" and (not spoken or self.engine.time(spoken) >= self.engine.time(old.get("promised_at") or old["created_at"])):
+                self.resolve_thread(old["id"], session, now)
+            return
+        if old or plan["status"] == "cancelled":
+            return
+        due = self.promise_time(plan, value.when)
+        if due + timedelta(days=1) <= now and plan["status"] == "completed":
+            return
+        title = f"到{plan['location']}后报信" if value.when == "arrival" else f"完成「{plan['title']}」后报信"
+        thread = self.save_thread(title, value.evidence, session, max(due, now).isoformat(), now, source_ref=ref)
+        thread.update(plan_id=plan["id"], when=value.when, destination=plan["location"], promised_at=spoken or now.isoformat())
+        with self.engine.store.db:
+            self.engine.store.put("thread", thread)
+
+    def promise_time(self, plan, when):
+        return self.engine.time(plan["start"] if when == "arrival" and plan["kind"] != "travel" else plan["end"])
+
+    def promise_ready(self, thread, plan):
+        if thread["when"] == "arrival" and plan["kind"] != "travel":
+            if trip := self.engine.store.find("plan", plan.get("travel_id", "")):
+                return trip["status"] == "completed"
+            return plan["status"] in {"active", "completed", "awaiting_confirmation"} and bool(plan["location"])
+        return plan["status"] == "completed"
+
+    def can_report(self, thread):
+        review = self.engine.store.find("runtime", "chat_schedule:" + thread["session_id"])
+        plan = self.engine.store.find("plan", thread["plan_id"])
+        return (thread["status"] == "open" and not thread["requested_at"] and not (review and review.get("pending"))
+                and plan and plan["status"] != "cancelled"
+                and (thread["when"] != "arrival" or plan["location"] == thread["destination"])
+                and self.promise_ready(thread, plan))
+
     def expire_threads(self, now):
         """到期话题结束主动跟进，按运行记录保留规则清理。"""
         with self.engine.store.db:
             for record in self.engine.store.all("thread"):
+                if record.get("plan_id") and record["status"] == "open":
+                    plan = self.engine.store.find("plan", record["plan_id"])
+                    if not plan or plan["status"] == "cancelled" or (record["when"] == "arrival" and plan["location"] != record["destination"]):
+                        record.update(status="resolved", resolved_at=now.isoformat())
+                        self.engine.store.put("thread", record)
+                        continue
+                    due = self.promise_time(plan, record["when"])
+                    if record["due_at"] != due.isoformat():
+                        record.update(due_at=due.isoformat(), expires_at=(due + timedelta(days=1)).isoformat())
+                        self.engine.store.put("thread", record)
+                    if not self.promise_ready(record, plan):
+                        continue
                 end = self.engine.time(record.get("expires_at") or record["due_at"]) + (timedelta() if record.get("expires_at") else timedelta(days=1))
                 if record["status"] == "open" and end <= now:
                     record.update(status="expired", resolved_at=end.isoformat())

@@ -100,7 +100,7 @@ class ShareReceipts:
                 raise ValueError(f"请选择1至{len(intents)}之间的候选序号")
         return await generate(self.ctx, self.store, config, "分享判断", prompt, ShareDecision, validate=validate, max_chars=budget)
 
-    async def express(self, session, intent, row, now):
+    async def express(self, session, intent, row, now, *, can_report=None):
         """通过原生 Replyer 生成分享，发送回执用于结算额度。"""
         row = {**row, "id": f"express:{uuid4().hex}", "created": now.isoformat(),
                "calls": {}, "outcome": "生成中", "delivery": "正在组织这次分享"}
@@ -118,6 +118,10 @@ class ShareReceipts:
             text = result["text"].strip()
             if not text:
                 raise RuntimeError("回复生成结果为空")
+            thread = self.store.find("thread", row["thread_id"]) if row.get("thread_id") else None
+            if thread and thread.get("plan_id") and can_report and not can_report(thread):
+                row.update(outcome="稍后再聊", delivery="日程或聊天已有更新，重新核对约定")
+                return
             stage = "发送失败"
             result = await self.ctx.send.text(text, session, return_details=True,
                                               storage_message=True, sync_to_maisaka_history=True)
@@ -142,6 +146,10 @@ class ShareReceipts:
         row = self.store.find("share_receipt", task) if task else None
         if not row or row["session"] != session or row["outcome"] != "MaiBot 已受理":
             return
+        calls = [item["tool_call"] for item in items if item.get("item_type") == "FunctionCallItem"]
+        if len(calls) == 1 and calls[0]["func_name"] == "wait" and not (calls[0].get("args") or {}).get("seconds") and not row["calls"]:
+            row.update(outcome="Planner 选择沉默", delivery="Planner 选择结束本轮，未发送消息",
+                       finished_at=datetime.now().astimezone().isoformat())
         if not any(item.get("item_type") == "FunctionCallItem" for item in items) and not row["calls"]:
             row.update(outcome="Planner 未调用工具", delivery=output_summary(items) + "。本轮尚无发送回执",
                        finished_at=datetime.now().astimezone().isoformat())
@@ -190,7 +198,7 @@ class ShareReceipts:
                     failure = data.get("error_message") or "MaiBot 返回发送失败"
             if row["outcome"] == "MaiBot 已受理":
                 if complete and stops:
-                    row.update(outcome="Planner 选择沉默", delivery="Planner 调用了 stop")
+                    row.update(outcome="Planner 选择沉默", delivery="Planner 已静默结束本轮")
                 elif complete and failure:
                     row.update(outcome="发送失败", delivery=failure)
                 elif now - datetime.fromisoformat(row["created"]) > timedelta(hours=1):

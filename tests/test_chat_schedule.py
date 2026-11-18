@@ -9,6 +9,60 @@ from maiweave.core.models import ChatArrangement, RoutineInput, PlanInput
 from test_plugin import plugin
 
 
+@pytest.mark.parametrize("when", ["arrival", "completion"])
+async def test_promise_follows_rescheduled_activity(plugin, monkeypatch, when):
+    from maiweave.core.models import PlanPromise, PlanPatch
+    p = plugin
+    now = p.now()
+    start = now + timedelta(hours=1)
+    plan = p.spatial.schedule(PlanInput(title="去图书馆看书", kind="study", location="图书馆",
+        start=start.isoformat(), end=(start + timedelta(hours=1)).isoformat()), "chat-a", now)
+    value = PlanPromise(plan_id=plan["id"], when=when, action="promise", evidence="到时候告诉你")
+    with pytest.raises(ValueError, match="当前聊天流"):
+        p.continuity.plan_promise(value, "chat-b", now)
+    p.continuity.plan_promise(value, "chat-a", now)
+    p.continuity.plan_promise(value, "chat-a", now)
+    thread, = p.store.all("thread")
+    p.spatial.change(plan["id"], PlanPatch(start=(start + timedelta(hours=1)).isoformat(),
+        end=(start + timedelta(hours=2)).isoformat()), "chat-a", now)
+    for offset, ready in [(0, False), (1, when == "arrival"), (2, True)]:
+        at = start + timedelta(hours=offset)
+        p.engine.advance(at)
+        p.continuity.expire_threads(at)
+        thread = p.store.get("thread", thread["id"])
+        assert bool(p.continuity.can_report(thread)) == ready
+    p.chat_schedule.mark("chat-a", at, "用户")
+    assert not p.continuity.can_report(thread)
+    p.continuity.plan_promise(value.model_copy(update={"action": "answered"}), "chat-a", at)
+    p.continuity.plan_promise(value, "chat-a", at)
+    assert p.store.get("thread", thread["id"])["status"] == "resolved"
+
+
+async def test_cancelled_promise_silences_queued_planner(plugin, monkeypatch):
+    from maiweave.core.models import PlanPromise
+    p = plugin
+    now = moment(p, monkeypatch)
+    plan = p.engine.create_plan(PlanInput(title="整理相册", start=now.isoformat(),
+        end=(now + timedelta(minutes=20)).isoformat()), "", now)
+    p.continuity.plan_promise(PlanPromise(plan_id=plan["id"], when="completion", action="promise",
+        evidence="整理好就告诉你"), "chat-a", now)
+    thread, = p.store.all("thread")
+    task = "proactive:ilworkcn.maiweave:123"
+    p.living.receipts.accept(task, {"thread_id": thread["id"], "session": "chat-a"}, now)
+    p.engine.transition(plan["id"], "cancel", "", now)
+    p.continuity.expire_threads(now)
+    marker = {"item_type": "UserMessageItem", "parts": [{"type": "text", "text":
+        f'<plugin_proactive_task id="{task}" plugin_id="ilworkcn.maiweave">'}]}
+    tools = [{"type": "function", "function": {"name": name}} for name in ("reply", "wait")]
+    result = await p.planner_context(session_id="chat-a", items=[marker], tool_definitions=tools)
+    assert result["modified_kwargs"]["tool_definitions"] == tools[1:]
+    assert p.store.get("thread", thread["id"])["status"] == "resolved"
+    await p.planner_receipt("chat-a", [{"item_type": "FunctionCallItem",
+        "tool_call": {"call_id": "test-wait", "func_name": "wait", "args": {}}}])
+    assert p.store.get("share_receipt", task)["outcome"] == "Planner 选择沉默"
+    assert not p.living.receipts.sent_times("chat-a", now.tzinfo)
+
+
 def moment(plugin, monkeypatch):
     now = plugin.now().replace(hour=9, minute=0, second=0, microsecond=0)
     monkeypatch.setattr(plugin, "now", lambda: now)

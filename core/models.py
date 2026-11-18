@@ -135,8 +135,16 @@ class ChatArrangement(BaseModel):
     cancel_plan_ids: list[str] = Field(default_factory=list)
 
 
+class PlanPromise(BaseModel):
+    plan_id: str
+    when: Literal["arrival", "completion"]
+    action: Literal["promise", "answered"]
+    evidence: str = Field(min_length=1, max_length=500)
+
+
 class ChatArrangements(BaseModel):
     arrangements: list[ChatArrangement] = Field(default_factory=list, max_length=8)
+    promises: list[PlanPromise] = Field(default_factory=list, max_length=8)
 
 
 class RoutineInput(BaseModel):

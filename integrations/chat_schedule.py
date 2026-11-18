@@ -111,8 +111,12 @@ class ChatSchedule:
                 used += size
             digest = hashlib.sha256(json.dumps(messages, ensure_ascii=False).encode()).hexdigest()
             if messages and digest != row["checked"]:
-                plans = [{k: r[k] for k in ("id", "title", "kind", "start", "end")}
-                         for r in p.engine.plans(session) if r["status"] in ACTIVE | {"paused", "blocked"} and not r.get("activity_id")][:20]
+                visible = [r for r in p.engine.plans(session) if not r.get("activity_id")]
+                plans = [{k: r[k] for k in ("id", "title", "kind", "start", "end", "location", "status")}
+                         for r in visible if r["status"] in ACTIVE | {"paused", "blocked"}][:20]
+                linked = [r for r in p.store.all("thread") if r["session_id"] == session and r.get("plan_id") and r["status"] == "open"]
+                recent = [r for r in visible if r["status"] == "completed" and p.engine.time(r["end"]) >= p.engine.time(messages[-1]["时间"])][-4:]
+                candidates = {r["id"] for r in plans + recent} | {r["plan_id"] for r in linked}
                 prompt = (
                     "提取聊天中已经确定、会影响角色本人日程的临时安排，输出JSON对象arrangements数组。"
                     "结合双方发言判断事情属于谁；用户自己的调休、请假记录在用户近况，arrangements填空数组。"
@@ -126,9 +130,17 @@ class ChatSchedule:
                     "时间根据发言日期解释；下午可按12至18点，全天按当天0点至次日0点，明确时间优先。"
                     "约定变更用原record_id更新内容及时间，取消限制时blocked_kinds填空数组。"
                     f"现在：{now.isoformat()}；已有事项：{json.dumps(self.context(now, session), ensure_ascii=False)}；"
+                    "另输出promises数组。角色亲口答应到达某地后报信、或做完某项日程后告诉对方时，按目的地或事项匹配plan_id。"
+                    "每项填plan_id、when（到达arrival，做完completion）、action（答应promise，已经告诉对方结果answered）、evidence（逐字引用角色消息）。"
+                    "例如去图书馆途中说‘到了再跟你说’，关联图书馆活动的arrival。对方追问还不算答复，麦麦说‘到啦’才算。"
+                    "单纯计划或泛泛道别无需报信。同一段对话已经报过时也提取answered。与报信有关的内容放promises。"
+                    f"近期完成：{[(r['id'], r['title'], r['location']) for r in recent]}；待报信：{[(r['plan_id'], r['when'], r['context']) for r in linked]}；"
                     f"可调整日程：{json.dumps(plans, ensure_ascii=False)}；最近聊天（按先后）：{json.dumps(list(reversed(messages)), ensure_ascii=False)}"
                 )
                 def validate(result):
+                    for value in result.promises:
+                        if value.plan_id not in candidates or not any(m["角色本人"] and value.evidence in m["内容"] for m in messages):
+                            raise ValueError("报信事项请引用角色本人消息的原文，并选择所列日程")
                     for value in result.arrangements:
                         speakers = [m for m in messages if m["发言人ID"] == value.speaker_id]
                         if not speakers:
@@ -139,6 +151,9 @@ class ChatSchedule:
                 result = await generate(p.ctx, p.store, p.config, "聊天安排", prompt, ChatArrangements, validate)
                 for value in result.arrangements:
                     self.save(value, session, value.speaker_id, now)
+                for value in sorted(result.promises, key=lambda v: v.action == "answered"):
+                    spoken = next(m["时间"] for m in messages if m["角色本人"] and value.evidence in m["内容"])
+                    p.continuity.plan_promise(value, session, now, spoken)
             current = p.store.get("runtime", row["id"])
             current.update(checked=digest, pending=current["updated_at"] != row["updated_at"])
             with p.store.db:

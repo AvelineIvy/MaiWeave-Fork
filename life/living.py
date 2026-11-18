@@ -787,6 +787,8 @@ class Living:
                 thread = store.find("thread", row.get("thread_id", ""))
                 if thread and self.thread_key(thread) == row["record_id"] and not thread["requested_at"]:
                     thread["requested_at"] = row["sent_at"]
+                    if thread.get("plan_id"):
+                        thread.update(status="resolved", resolved_at=row["sent_at"])
                     store.put("thread", thread)
                 row["settled"] = True
                 store.put("share_receipt", row)
@@ -874,7 +876,7 @@ class Living:
             return
         current = engine.current(now)
         pause = self.proactive_pause(now)
-        if pause:
+        if pause and pause["reason"] != "busy":
             record("跳过", pause["message"])
             return
         sessions = dict.fromkeys([*config.session_ids, *(p["session_id"] for p in engine.store.all("profile"))])
@@ -943,11 +945,26 @@ class Living:
                     notices.append((f"confirmation:{plan['id']}", f"之前约好的{plan['title']}已经过了计划时间，完成情况尚未确认。可以问问对方实际进展，再根据回复更新记录。", None))
             for item in engine.store.all("thread"):
                 if item["session_id"] == session and item["status"] == "open" and not item["requested_at"] and engine.time(item["due_at"]) <= now:
+                    if item.get("plan_id"):
+                        if self.continuity.can_report(item):
+                            plan = engine.store.get("plan", item["plan_id"])
+                            milestone = "已经抵达" if item["when"] == "arrival" else "已经完成"
+                            intent = (f"你对这个聊天的原话是「{item['context']}」。请用一句话兑现这次报信。"
+                                      f"本次进展：{milestone}；地点：{plan['location']}；日程：{plan['title']}；"
+                                      f"对应时间：{item['due_at']}。本次只说这项进展，当前活动和以往聊天按各自时间区分。")
+                            notices.insert(0, (self.thread_key(item), intent, item))
+                        continue
                     notices.append((self.thread_key(item), f"接续此前的话题：{item['title']}。已有上下文：{item['context']}。结合最近聊天跟进仍待解决的部分；已经解决时结束该话题。", item))
             for item in engine.store.all("schedule_issue"):
                 if item["session_id"] == session:
                     notices.append((f"issue:{item['id']}:{item['reason']}", f"安排需要调整：{item['title']}。原因：{item['reason']}。说明当前待调整的状态。", None))
             notices = [n for n in notices if n[0] not in sent.get("notice_ids", []) and self.share_ready(n[0], session, now)]
+            if pause:
+                notices = [n for n in notices if n[2] and n[2].get("when") == "arrival" and ordinary_hours
+                           and n[2].get("plan_id") == current["id"]]
+                if not notices:
+                    record("跳过", pause["message"], session)
+                    continue
             if not ordinary_hours:
                 notices, event = [], None
             if greeting and self.share_ready("greeting:" + greeting["key"], session, now) and not notices and (not event or event["importance"] < 7):
@@ -1027,7 +1044,7 @@ class Living:
                             "outcome": "稍后再聊", "delivery": decision.reason})
                     continue
             if config.mode == "主动表达":
-                await self.receipts.express(session, intent, row, now)
+                await self.receipts.express(session, intent, row, now, can_report=self.continuity.can_report)
             else:
                 try:
                     result = await self.ctx.maisaka.proactive.trigger(

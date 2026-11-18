@@ -389,7 +389,15 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         if not self.config.life.enabled:
             return {"action": "continue", "modified_kwargs": kwargs}
         session = kwargs["session_id"]
-        self.living.receipts.turn[session] = planner_task(kwargs["items"])
+        task = planner_task(kwargs["items"])
+        self.living.receipts.turn[session] = task
+        receipt = self.store.find("share_receipt", task) if task else None
+        thread = self.store.find("thread", receipt["thread_id"]) if receipt and receipt.get("thread_id") else None
+        if thread and thread.get("plan_id") and not self.continuity.can_report(thread) and not receipt.get("calls"):
+            kwargs["tool_definitions"] = [tool for tool in kwargs.get("tool_definitions", [])
+                                          if tool.get("function", {}).get("name") in {"wait", "stop"}]
+            kwargs["items"].append({"item_type": "UserMessageItem", "parts": [{"type": "text", "text": "这次报信的日程或聊天已有更新，本轮请静默结束。"}]})
+            return {"action": "continue", "modified_kwargs": kwargs}
         kwargs["items"] = [i for i in kwargs["items"] if i.get("meta", {}).get("item_id") != "maiweave-life-context"]
         latest = next((i for i in reversed(kwargs["items"]) if i["item_type"] == "UserMessageItem"), {})
         text = "".join(p["text"] for p in latest.get("parts", []) if p.get("type") == "text")
