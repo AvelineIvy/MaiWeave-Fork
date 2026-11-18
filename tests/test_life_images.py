@@ -112,6 +112,8 @@ async def test_corrected_experience_regenerates_image(plugin, monkeypatch):
 async def test_image_tool_follows_switches_and_chat_ownership(plugin, monkeypatch):
     import copy
     p = plugin
+    registered = next(c for c in p.get_components() if c["name"] == "maiweave_show_life")
+    assert registered["metadata"]["visibility"] == "visible"
     now, event = setup(p, monkeypatch)
     tools = [{"type": "function", "function": {"name": "maiweave_show_life", "description": "生成或复用图片"}},
              {"type": "function", "function": {"name": "maiweave_query", "description": "查询生活"}}]

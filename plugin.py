@@ -449,7 +449,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
     async def share_followup(self, receipt_id: str, summary: str, status: str, **kwargs):
         return self.living.receipts.respond(receipt_id, kwargs["stream_id"], kwargs["user_id"], summary, status, self.now())
 
-    @Tool("maiweave_wake", description="用户当前需要陪伴或明确请求醒来时使用。结合当前消息和前文判断，reason 填写触发这次唤醒的具体表达。", parameters=schema({"reason": text_field("当前需要陪伴的表达")}, ["reason"]))
+    @Tool("maiweave_wake", description="麦麦睡眠中，用户需要陪伴或明确请求叫醒她时使用。reason 填写触发这次唤醒的具体表达。", parameters=schema({"reason": text_field("当前需要陪伴的表达")}, ["reason"]))
     @operation
     async def wake(self, reason: str, **kwargs):
         await self.identify_person(kwargs["stream_id"], kwargs.get("user_id", ""), kwargs.get("platform", ""))

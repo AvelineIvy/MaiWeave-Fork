@@ -16,7 +16,7 @@ def parameters(properties, required):
 
 
 class FeatureTools:
-    @Tool("maiweave_show_life", description="用户问刚做的东西是什么样、给我看看、发张照片时，展示对应生活经历的图片。list查询近期经历编号，send按experience_id生成或复用图片并发到当前聊天；已有图片直接发送；首次生成返回后台任务，完成后自动发送。画面与该经历保持一致。", parameters=parameters({
+    @Tool("maiweave_show_life", visibility="visible", description="用户说“我想看看你”、想看自拍或刚做好的东西时，展示对应生活图片。先用list查近期经历，再用send填写experience_id和想看的画面。已有图片直接发送，新图生成后自动发到当前聊天。", parameters=parameters({
         "action": {"type": "string", "enum": ["list", "send"]},
         "experience_id": {"type": "string", "description": "要展示的生活经历编号"},
         "framing": {"type": "string", "maxLength": 300, "description": "当前用户希望展示的画面，如单手持机自拍、物件特写、麦麦做饭的样子；沿用当前请求，并填写本轮已明确的麦麦穿着；已有图片继续复用"},
