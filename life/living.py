@@ -230,12 +230,27 @@ class Living:
         if plans or changed:
             self.spatial.reconcile(now)
 
-    def apply_schedule(self, now):
+    def offline_sleep_windows(self, now):
+        """按作息找出离线期间可以补算睡眠的时段。"""
+        cursor = self.engine.time(self.engine.state()["updated_at"])
+        for key in ("awakening", "sleep_skip", "busy"):
+            record = self.engine.store.find("runtime", key)
+            if record:
+                cursor = max(cursor, self.engine.time(record["until"]))
+        while cursor < now:
+            start, end = self.sleep_window(cursor)
+            if start >= now:
+                break
+            yield max(cursor, start), min(end, now)
+            cursor = end
+
+    def apply_schedule(self, now, *, resuming=False):
         """切换全天候模式时撤销自主睡眠，保留用户明确安排的日程。"""
         if not self.config.life.enabled:
             return
         if self.config.life.schedule_enabled:
-            self.engine.advance(now)
+            windows = self.offline_sleep_windows(now) if resuming and self.config.life.autonomous else ()
+            self.engine.advance(now, sleep_windows=windows)
             self.sync_sleep_schedule(now)
             self.resume_sleep(now)
             return

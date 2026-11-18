@@ -398,7 +398,7 @@ class LifeEngine:
         if plan["kind"] in {"leisure", "social"}:
             state["mood"] = bounded(state["mood"] + 3, -100, 100)
 
-    def advance(self, now: datetime) -> dict:
+    def advance(self, now: datetime, *, sleep_windows=()) -> dict:
         """按已有日程结算活动，并更新空闲时段的身体状态。"""
         state = self.state()
         cursor = self.time(state["updated_at"])
@@ -406,17 +406,25 @@ class LifeEngine:
             return state
         plans = [p for p in self.store.all("plan") if p["status"] in ACTIVE]
         boundaries = {cursor, now}
+        sleep_changes = {}
+        for start, end in sleep_windows:
+            sleep_changes[start] = True
+            sleep_changes[end] = False
+        boundaries.update(sleep_changes)
         for p in plans:
             for key in ("start", "end"):
                 t = self.time(p[key])
                 if cursor < t < now:
                     boundaries.add(t)
         times = sorted(boundaries)
+        sleeping = False
         with self.store.db:
             for left, right in zip(times, times[1:]):
+                sleeping = sleep_changes.get(left, sleeping)
                 current = next((p for p in plans if self.time(p["start"]) <= left < self.time(p["end"])), None)
                 seconds = (right - left).total_seconds()
-                self._evolve(state, seconds / 3600, current["kind"] if current else "idle")
+                kind = current["kind"] if current else ("sleep" if sleeping else "idle")
+                self._evolve(state, seconds / 3600, kind)
                 if current:
                     if current["elapsed_seconds"] == 0:
                         current["elapsed_days"] = {}

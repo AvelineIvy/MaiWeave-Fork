@@ -224,7 +224,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         self.living.images = self.life_images
         self.spatial.check_influence = self.living.check_influence
         self.presence = self.living.presence
-        self.living.apply_schedule(self.now())
+        self.living.apply_schedule(self.now(), resuming=True)
         self.last_error = ""
         self.last_errors = {}
         self.planning_status = "等待首次规划检查"
