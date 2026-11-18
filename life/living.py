@@ -1072,7 +1072,8 @@ class Living:
             with self.engine.store.db:
                 self.engine.store.put("share_receipt", row)
             try:
-                result = await self.images.send(row["experience_id"], row["session"], now, share_id=row["id"])
+                result = await self.images.send(row["experience_id"], row["session"], now, share_id=row["id"],
+                                                since=self.receipts.time(row["sent_at"], now.tzinfo))
                 row.update(image_delivery="已发送", image_message_id=result["message_id"])
             except Exception as error:
                 row.update(image_delivery="发送失败", image_error=str(error))

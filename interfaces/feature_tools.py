@@ -3,6 +3,7 @@
 from maibot_sdk import Tool
 
 from ..core.models import RoutineInput, ChatArrangement
+from ..integrations.life_images import FINISH_IMAGE, SENT_IMAGE
 
 
 def parameters(properties, required):
@@ -26,7 +27,8 @@ class FeatureTools:
         session = kwargs["stream_id"]
         if action == "list":
             items = self.life_images.candidates(session)
-            return {"enabled": self.config.diary.chat_images_enabled and (self.config.diary.image_service_enabled or bool(items)),
+            return {"instruction": "选中经历后调用 send 一次。list 只列经历；提交后按 send 的回执结束本轮。",
+                    "enabled": self.config.diary.chat_images_enabled and (self.config.diary.image_service_enabled or bool(items)),
                     "generation_enabled": self.config.diary.image_service_enabled, "items": items}
         if action != "send":
             raise ValueError("请选择查询或发送图片")
@@ -34,13 +36,17 @@ class FeatureTools:
         if not self.config.diary.chat_images_enabled:
             raise ValueError("聊天图片已关闭")
         row = self.store.find("experience_image", experience_id) or {}
-        if row.get("image_status") == "生成中":
-            return {"status": "正在生成，请稍等"}
+        key = (session, experience_id)
+        if key in self.life_images.pending_requests:
+            return {"status": "正在生成，请稍等", "instruction": FINISH_IMAGE}
         if self.life_images.reusable(event, row):
-            return await self.life_images.send(experience_id, session, self.now())
+            result = await self.life_images.send(experience_id, session, self.now())
+            return {**result, "instruction": SENT_IMAGE}
         if not self.config.diary.image_service_enabled:
             raise ValueError("图片生成服务已关闭")
-        return self.start_job("生成生活图片，完成后发送到当前聊天", self.life_images.requested(experience_id, session, self.now(), framing=framing))
+        job = self.start_job("生成生活图片，完成后发送到当前聊天", self.life_images.requested(experience_id, session, self.now(), framing=framing))
+        self.life_images.pending_requests.add(key)
+        return {**job, "instruction": FINISH_IMAGE}
 
     @Tool("maiweave_chat_arrangement", description="保存聊天中已确定的角色本人临时安排，如调休、请假。填写适用时间、原话依据，调休blocked_kinds填work；更新同一事项传record_id，取消限制时填空blocked_kinds。cancel_plan_ids用于取消已有日程；plan_updates按plan_id和patch改期，沿用日程与出行逻辑。用户自己的作息使用maiweave_person_state。成功后再向用户确认安排。", parameters=parameters({"arrangement": ChatArrangement.model_json_schema()}, ["arrangement"]))
     async def chat_arrangement(self, arrangement: dict, **kwargs):

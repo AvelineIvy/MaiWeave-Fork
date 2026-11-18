@@ -18,7 +18,7 @@ from .config import MaiWeaveConfig
 from .core.engine import LifeEngine, read_life_status
 from .life.living import Living
 from .integrations.memory import NativeMemory
-from .integrations.life_images import LifeImages
+from .integrations.life_images import LifeImages, distinct_image_calls
 from .core.models import ExperienceInput, GoalInput, PlanInput, PlanPatch, RelationshipChange
 from .core.store import Store
 from .integrations.chat_context import ChatContext
@@ -385,7 +385,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
     @HookHandler("maisaka.planner.before_request")
     async def planner_context(self, **kwargs):
         if "tool_definitions" in kwargs:
-            kwargs["tool_definitions"] = self.life_images.tool_definitions(kwargs["tool_definitions"], kwargs["session_id"])
+            kwargs["tool_definitions"] = self.life_images.tool_definitions(kwargs["tool_definitions"], kwargs["session_id"], kwargs["items"])
         if not self.config.life.enabled:
             return {"action": "continue", "modified_kwargs": kwargs}
         session = kwargs["session_id"]
@@ -423,12 +423,16 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
 
     @HookHandler("maisaka.planner.after_response")
     async def planner_receipt(self, session_id: str, output_items: list, **kwargs):
+        original_items = output_items
+        output_items = distinct_image_calls(output_items)
         self.living.receipts.observe(session_id, output_items)
         self.presence.observe_planner(session_id, output_items, self.now())
         self.living.observe_farewell(session_id, output_items, self.now())
         if not any(item.get("item_type") == "FunctionCallItem" for item in output_items):
             self.ctx.logger.info("MaiWeave Planner 响应 [%s]：%s；睡眠静默=%s",
                                  session_id, output_summary(output_items), self.living.quiet_sleep(self.now()))
+        if len(output_items) != len(original_items):
+            return {"action": "continue", "modified_kwargs": {**kwargs, "session_id": session_id, "output_items": output_items}}
         return {"action": "continue"}
 
     @HookHandler("maisaka.replyer.before_request")

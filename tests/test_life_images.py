@@ -1,10 +1,109 @@
 """聊天配图的来源、复用、开关与主动发送结算。"""
+import asyncio
 import json
+from datetime import timedelta
 from unittest.mock import AsyncMock
 import pytest
 from test_plugin import plugin
 from test_diary_images import service
 from maiweave.core.models import ExperienceInput
+from maiweave.integrations.life_images import image_request_handled
+
+
+def test_planner_stops_offering_images_after_accepted_send():
+    def message(body):
+        return {"item_type": "UserMessageItem", "parts": [{"type": "text", "text": body}]}
+    call = {"item_type": "FunctionCallItem", "tool_call": {"call_id": "one", "func_name": "maiweave_show_life", "args": {"action": "send"}}}
+    result = {"item_type": "FunctionCallOutputItem", "call_id": "one", "output": '{"status":"进行中"}'}
+    items = [message('<message msg_id="1">看看书签'), call]
+    assert not image_request_handled(items)
+    assert not image_request_handled([*items, {**result, "output": "发送失败"}])
+    items += [result, message('<message msg_id="2" is_self_message="true">[图片]'), message("请分析后决定下一步")]
+    assert image_request_handled(items)
+    assert image_request_handled([*items, message('<message msg_id="image-1" user="麦麦">[图片]')],
+                                 lambda mid: mid == "image-1")
+    assert not image_request_handled([*items, message('<message msg_id="3">再发一次')])
+    assert not image_request_handled([*items, message('<plugin_proactive_task id="next">')])
+
+
+async def test_planner_batch_sends_each_cached_image_once(plugin, monkeypatch):
+    p = plugin
+    now, event = setup(p, monkeypatch)
+    await p.life_images.send(event["id"], "chat-a", now)
+    p.ctx.send.image.reset_mock()
+    def call(cid, action, eid=""):
+        return {"item_type": "FunctionCallItem", "tool_call": {"call_id": cid, "func_name": "maiweave_show_life",
+                "args": {"action": action, "experience_id": eid}}}
+    items = [call("a", "list"), call("b", "list"), call("c", "send", event["id"]),
+             call("d", "send", event["id"]), call("e", "send", "other")]
+    result = await p.planner_receipt("chat-a", items, item_schema_version=1)
+    kept = result["modified_kwargs"]["output_items"]
+    assert kept == [items[0], items[2], items[4]]
+    assert result["modified_kwargs"]["item_schema_version"] == 1
+    for item in kept[:2]:
+        await p.show_life(**item["tool_call"]["args"], stream_id="chat-a")
+    p.ctx.send.image.assert_awaited_once()
+    assert await p.planner_receipt("chat-a", [items[2]]) == {"action": "continue"}
+
+
+@pytest.mark.parametrize("mode", ["自然交流", "主动表达"])
+@pytest.mark.parametrize("first", ["追问", "主动", "已送达"])
+async def test_same_picture_reaches_chat_once(plugin, monkeypatch, mode, first):
+    p = plugin
+    now, event = setup(p, monkeypatch)
+    row = {"id": "share", "session": "chat-a", "created": now.isoformat(), "sent_at": now.isoformat(),
+           "outcome": "实际已发送", "mode": mode, "experience_id": event["id"], "image_requested": True}
+    with p.store.db:
+        p.store.put("share_receipt", row)
+    started, resume = asyncio.Event(), asyncio.Event()
+    async def deliver(*args, **kwargs):
+        started.set()
+        await resume.wait()
+        return {"sent": True, "message_id": "image-1"}
+    p.ctx.send.image.side_effect = deliver
+    if first == "主动":
+        share = asyncio.create_task(p.living.share_images(now))
+        await asyncio.wait_for(started.wait(), 5)
+        chat = asyncio.create_task(p.show_life("send", event["id"], stream_id="chat-a"))
+        await asyncio.sleep(0)
+        resume.set()
+        await asyncio.gather(share, chat)
+    else:
+        job = await p.show_life("send", event["id"], stream_id="chat-a")
+        assert "after_reply=stop" in job["instruction"]
+        again = await p.show_life("send", event["id"], stream_id="chat-a")
+        assert again["status"] == "正在生成，请稍等"
+        await asyncio.wait_for(started.wait(), 5)
+        if first == "已送达":
+            resume.set()
+            await asyncio.gather(*list(p.jobs))
+        share = asyncio.create_task(p.living.share_images(now))
+        await asyncio.sleep(0)
+        resume.set()
+        await asyncio.gather(share, *list(p.jobs))
+    assert len(p.store.all("image_delivery")) == p.ctx.send.image.await_count == 1
+    assert p.store.get("share_receipt", "share")["image_message_id"] == "image-1"
+    assert len(p.living.receipts.sent_times("chat-a", now.tzinfo)) == 1
+    resent = await p.show_life("send", event["id"], stream_id="chat-a")
+    assert "after_reply=stop" in resent["instruction"] and p.ctx.send.image.await_count == 2
+
+
+async def test_auto_image_uses_only_matching_deliveries(plugin, monkeypatch):
+    p = plugin
+    now, event = setup(p, monkeypatch, session="")
+    await p.life_images.send(event["id"], "chat-b", now)
+    await p.life_images.send(event["id"], "chat-a", now)
+    later = p.now() + timedelta(minutes=1)
+    with p.store.db:
+        for key, session, status in [("other", "chat-b", "已发送"), ("failed", "chat-a", "发送失败")]:
+            p.store.put("image_delivery", {"id": key, "experience_id": event["id"], "session_id": session,
+                                           "status": status, "at": later.isoformat(), "share_id": ""})
+    row = {"id": "share", "session": "chat-a", "created": later.isoformat(), "sent_at": later.isoformat(),
+           "outcome": "实际已发送", "experience_id": event["id"], "image_requested": True}
+    with p.store.db:
+        p.store.put("share_receipt", row)
+    await p.living.share_images(later)
+    assert p.ctx.send.image.await_count == 3
 
 
 def setup(p, monkeypatch, session="chat-a"):
