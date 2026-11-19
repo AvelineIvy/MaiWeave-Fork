@@ -222,7 +222,7 @@
 <details>
 <summary>手动安装与依赖版本</summary>
 
-农历功能使用 `lunar_python>=1.4.8,<2.0`，支持 1.4.9；SDK 依赖为 `maibot-plugin-sdk>=2.21.0,<3.0`，已适配 2.21、2.22 和 2.23 系列。
+农历纪念日使用 `lunar_python>=1.4.8`，生活时区使用 `tzdata>=2024.1`。插件已适配 MaiBot SDK 2.21、2.22 和 2.23 系列。
 
 1. 下载 Release 安装包，解压到 MaiBot 的 `plugins/MaiWeave` 目录，该目录下应直接包含 `_manifest.json` 和 `requirements.txt`。
 2. 在 **MaiBot 根目录**打开终端，用 uv 将插件依赖安装到 MaiBot 的虚拟环境：

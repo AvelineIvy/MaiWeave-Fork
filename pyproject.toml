@@ -5,7 +5,7 @@ description = "随着相处积累熟悉、信任与亲近，让麦麦有自己�
 license = "GPL-3.0-only"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
-dependencies = ["maibot-plugin-sdk>=2.21.0,<3.0", "tzdata>=2026.1", "lunar_python>=1.4.8,<2.0"]
+dependencies = ["maibot-plugin-sdk>=2.21.0,<3.0", "tzdata>=2024.1", "lunar_python>=1.4.8", "Pillow>=10.0"]
 
 [project.optional-dependencies]
 test = ["pytest>=8", "pytest-asyncio>=0.24"]
