@@ -19,7 +19,7 @@ def setting(label: str, **kwargs):
 
 class PluginSection(PluginConfigBase):
     __ui_label__ = "插件信息"
-    config_version: str = setting("配置版本", default="0.12.4", description="配置结构变更时更新。当前安装的插件版本见页面顶部。", json_schema_extra={"disabled": True})
+    config_version: str = setting("配置版本", default="0.12.5", description="配置结构变更时更新。当前安装的插件版本见页面顶部。", json_schema_extra={"disabled": True})
 
 
 class LifeConfig(PluginConfigBase):
@@ -32,6 +32,7 @@ class LifeConfig(PluginConfigBase):
     model_task: str = setting("默认生活模型（必填）", default="utils", description="从 MaiBot 已配置的模型任务中选择，默认 utils；任务选项在插件加载时更新。")
     schedule_enabled: bool = setting("遵循日常作息", default=True, description="关闭后切换为全天候模式，已有约定继续执行。")
     nap_quiet: bool = setting("午睡期间保持安静", default=True, description="日间睡眠时保持安静，醒来后接上当前话题。日间按入睡与起床时间之外判断；关闭后可在日间睡眠时回复，唤醒沿用现有设置。")
+    sleep_skip_private_planner: bool = setting("睡眠时普通私聊跳过 Planner", default=False, description="收到普通私聊时先检查唤醒条件。仍在睡眠静默时，本条消息跳过模型判断，也不进入 MaiBot 聊天历史。")
     wake_enabled: bool = setting("允许聊天唤醒", default=True, description="聊天唤醒总开关。普通私聊按下方概率唤醒；亲密人物可通过关键词或当前陪伴请求唤醒，群聊和私聊共用人物关系。")
     private_wake_probability: int = setting("私聊消息唤醒概率（%）", default=0, ge=0, le=100, description="开启聊天唤醒后，睡眠静默期间每轮普通私聊按此概率醒来。0 为关闭，100 为每轮都会醒来；午睡和夜间共用，醒来后沿用清醒时长。")
     wake_keywords: list[str] = setting("唤醒关键词（选填）", default_factory=lambda: ["心情不好", "难过", "很低落", "睡不着", "想找人聊聊", "陪陪我"], description="每项填写一个词。聊天中出现这些词时唤醒角色；可增删默认词，清空词表可关闭匹配。")

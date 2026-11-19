@@ -115,7 +115,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         groups = [
             ("life", "life", "生活开关", "控制生活推进与自主活动。", ["enabled", "autonomous"]),
             ("profile", "life", "角色设定", "时区已有默认值，背景和兴趣按需补充。", ["timezone", "interests", "background"]),
-            ("sleep", "life", "日常作息", "关闭作息可全天候交流；开启后按 24 小时制安排睡眠。", ["schedule_enabled", "nap_quiet", "sleep_hour", "wake_hour"]),
+            ("sleep", "life", "日常作息", "关闭作息可全天候交流；开启后按 24 小时制安排睡眠。", ["schedule_enabled", "nap_quiet", "sleep_skip_private_planner", "sleep_hour", "wake_hour"]),
             ("wake", "life", "睡眠唤醒", "设置私聊唤醒概率、唤醒词语和醒来后留给聊天的时间。", ["wake_enabled", "private_wake_probability", "wake_minutes", "wake_keywords"]),
             ("planning", "life", "更新与规划", "设置生活推进和自主规划的检查间隔。", ["tick_seconds", "planning_interval_minutes"]),
             ("weather", "world", "实时天气", "填写城市，查看当地天气和预报。", ["weather_enabled", "weather_provider", "weather_api_key", "city", "country_code"]),
@@ -663,7 +663,6 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         self.chat_context.kinds[message["session_id"]] = "group" if message.get("message_info", {}).get("group_info") else "private"
         self.chat_context.speakers[message["session_id"]] = message.get("message_info", {}).get("user_info", {}).get("user_id", "")
         if not re.fullmatch(r"/(?:maiweave|织生活)(?:\s+状态)?", (message.get("processed_plain_text") or "").strip()):
-            self.chat_context.messages[message["session_id"]] = message.get("processed_plain_text") or ""
             await self.identify_person(message["session_id"], message.get("message_info", {}).get("user_info", {}).get("user_id", ""), message.get("platform", ""))
             if self.config.life.enabled:
                 if not (message.get("processed_plain_text") or "").strip().startswith("/"):
@@ -678,9 +677,17 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
             handled_wake = self.living.wake_for_message(message.get("processed_plain_text") or "", message["session_id"], self.now(),
                                          message.get("message_info", {}).get("user_info", {}).get("user_id", ""))
             text = (message.get("processed_plain_text") or "").strip()
-            if (not handled_wake and self.chat_context.kinds[message["session_id"]] == "private" and text and not text.startswith("/")
-                    and self.config.life.private_wake_probability and self.living.quiet_sleep(self.now())):
-                self.chat_context.wake_candidates[message["session_id"]] = self.chat_context.speakers[message["session_id"]]
+            session = message["session_id"]
+            if self.chat_context.kinds[session] == "private" and not text.startswith("/"):
+                now = self.now()
+                if self.config.life.sleep_skip_private_planner and self.living.quiet_sleep(now, session):
+                    if text and not handled_wake:
+                        self.living.wake_for_private_turn(session, now, self.chat_context.speakers[session])
+                    if self.living.quiet_sleep(now, session):
+                        return {"action": "abort"}
+                elif not handled_wake and text and self.config.life.private_wake_probability and self.living.quiet_sleep(now):
+                    self.chat_context.wake_candidates[session] = self.chat_context.speakers[session]
+            self.chat_context.messages[session] = message.get("processed_plain_text") or ""
             return {"action": "continue"}
         # 接收 Hook 早于会话创建；先打开原生会话，首次使用指令也能收到回复。
         info = message["message_info"]
@@ -705,7 +712,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         activity = current["title"] if current and self.engine.visible(current, session) else "正在处理其他安排" if current else "空闲"
         state = self.engine.state()
         message = (
-            f"MaiWeave 0.12.4\n启用：{self.config.life.enabled}\n当前：{activity}\n"
+            f"MaiWeave 0.12.5\n启用：{self.config.life.enabled}\n当前：{activity}\n"
             f"精力：{state['energy']:.0f}；饥饿：{state['hunger']:.0f}；心情：{state['mood']:.0f}\n"
             f"聊天流：{session}\n原生记忆连接：{'已配置' if self.config.memory.enabled else '未配置'}\n"
             f"最近运行错误：{self.last_error or '无'}"

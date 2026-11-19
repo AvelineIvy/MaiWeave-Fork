@@ -1016,7 +1016,7 @@ class Living:
                 record("跳过", reason, session, score)
                 continue
             def sharing_intent(item):
-                text = ("分享本次选定的一件生活经历。从角色自己的视角分享，给对方自由接话的空间。"
+                text = ("分享本次选定的一件生活经历。挑一个最想告诉对方的细节，用一两句话说完，留给对方接话。"
                         f"值得分享的原因={item['score_reason']}；经历来源={item['source']}；内容={item['summary']}；"
                         f"本次经历发生时间={item['occurred_at']}；细节={json.dumps(item['details'], ensure_ascii=False)}")
                 return text + context
