@@ -16,6 +16,40 @@ def snapshot(text):
     return json.loads(text.split("\n")[-1])
 
 
+async def test_search_result_exposes_tool_for_current_turn(plugin):
+    name = "maiweave_space"
+    function = {"name": name, "description": "查询地图", "parameters": {"type": "object"}}
+    result = {"item_type": "FunctionCallOutputItem", "tool_name": "tool_search", "output": json.dumps({
+        "status": "loaded", "query": name, "tools": [function, {**function, "name": "maiweave_show_life"}]})}
+    msg = {"item_type": "UserMessageItem", "parts": [{"type": "text", "text": "<message >查地图"}]}
+    async def offered(items, defs):
+        args = await plugin.planner_context(session_id="a", items=items, tool_definitions=defs)
+        return args["modified_kwargs"]["tool_definitions"]
+    tool = {"type": "function", "function": function}
+    assert await offered([msg, result], []) == [tool]
+    assert await offered([msg, result], [tool]) == [tool]
+    assert await offered([msg, result, msg], []) == []
+
+
+async def test_followup_tool_uses_visible_share_ids_and_skips_acknowledgement(plugin):
+    plugin.config.proactive.enabled = True
+    tool = {"function": {"name": "maiweave_share_followup", "parameters": {"properties": {"receipt_id": {"type": "string"}}}}}
+    with plugin.store.db:
+        for session in ("a", "b"):
+            plugin.store.put("share_receipt", {"id": session, "session": session,
+                             "sent_at": plugin.now().isoformat(), "topic": "番茄炒蛋"})
+    for text, ids in [("这样呀", []), ("你番茄炒蛋是先炒蛋还是先炒番茄？", ["a"])]:
+        plugin.chat_context.messages["a"] = text
+        args = (await plugin.planner_context(session_id="a", items=[], tool_definitions=[tool]))["modified_kwargs"]
+        context = args["items"][-1]["parts"][0]["text"]
+        assert [r["id"] for r in snapshot(context).get("shared_topics", [])] == ids
+        defs = args["tool_definitions"]
+        if ids:
+            assert defs[0]["function"]["parameters"]["properties"]["receipt_id"]["enum"] == ids
+        else:
+            assert not defs and "maiweave_share_followup" not in context
+
+
 async def test_group_and_private_presets_use_native_chat_type(plugin):
     plugin.ctx.chat.get_all_streams.return_value = [{"stream_id": "group", "group_id": "123"}, {"stream_id": "private", "group_id": ""}]
     for stream, mode, budget in (("group", "精简", 2400), ("private", "均衡", 4800)):
@@ -130,7 +164,7 @@ async def test_config_upgrade_preserves_choices(plugin):
     upgraded = rebuild_plugin_config_data(defaults, old)
     assert upgraded['context'] == defaults['context']
     assert upgraded['proactive']['daily_limit'] == 9
-    assert upgraded['plugin']['config_version'] == '0.12.3'
+    assert upgraded['plugin']['config_version'] == '0.12.4'
     upgraded['context']['group_mode'] = '丰富'
     assert rebuild_plugin_config_data(defaults, upgraded)['context']['group_mode'] == '丰富'
 

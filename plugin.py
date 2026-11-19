@@ -18,10 +18,10 @@ from .config import MaiWeaveConfig
 from .core.engine import LifeEngine, read_life_status
 from .life.living import Living
 from .integrations.memory import NativeMemory
-from .integrations.life_images import LifeImages, distinct_image_calls
+from .integrations.life_images import LifeImages, current_image_candidates, distinct_image_calls
 from .core.models import ExperienceInput, GoalInput, PlanInput, PlanPatch, RelationshipChange
 from .core.store import Store
-from .integrations.chat_context import ChatContext
+from .integrations.chat_context import ChatContext, discovered_tools
 from .integrations.chat_schedule import ChatSchedule
 from .core.retention import Retention
 from .integrations.share_receipts import planner_task, output_summary
@@ -214,6 +214,8 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         self.books = Books(self.engine, self.ctx, self.config, self.ctx.paths.data_dir)
         self.chat_books = {}
         self.chat_context = ChatContext(self)
+        self.searchable_tools = {c["name"] for c in self.get_components() if c["type"] == "TOOL"
+                                 and c["name"] not in {"maiweave_share_followup", "maiweave_show_life"}}
         self.chat_schedule = ChatSchedule(self)
         self.diary = Diary(self.engine, self.ctx, self.config)
         self.diary_publisher = DiaryPublisher(self.engine, self.ctx, self.config)
@@ -384,12 +386,24 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
 
     @HookHandler("maisaka.planner.before_request")
     async def planner_context(self, **kwargs):
+        session = kwargs["session_id"]
+        followup_tool = next((t for t in kwargs.get("tool_definitions", [])
+                              if t.get("function", {}).get("name") == "maiweave_share_followup"), None)
+        if followup_tool:
+            kwargs["tool_definitions"] = [t for t in kwargs["tool_definitions"] if t is not followup_tool]
         if "tool_definitions" in kwargs:
+            self.life_images.planner_actions[session] = ()
             kwargs["tool_definitions"] = self.life_images.tool_definitions(kwargs["tool_definitions"], kwargs["session_id"], kwargs["items"])
         if not self.config.life.enabled:
             return {"action": "continue", "modified_kwargs": kwargs}
-        session = kwargs["session_id"]
+        if "tool_definitions" in kwargs:
+            kwargs["tool_definitions"] = discovered_tools(kwargs["items"], kwargs["tool_definitions"], self.searchable_tools)
         task = planner_task(kwargs["items"])
+        kwargs["items"] = current_image_candidates(kwargs["items"])
+        if task and "tool_definitions" in kwargs:
+            # 主动分享由发送回执按选定话题配图。
+            kwargs["tool_definitions"] = [t for t in kwargs["tool_definitions"]
+                                          if t.get("function", {}).get("name") != "maiweave_show_life"]
         self.living.receipts.turn[session] = task
         receipt = self.store.find("share_receipt", task) if task else None
         thread = self.store.find("thread", receipt["thread_id"]) if receipt and receipt.get("thread_id") else None
@@ -414,24 +428,38 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         else:
             self.chat_books.pop(session, None)
         # 动态状态随本轮对话附在末尾，MaiBot 的各模型适配器均保留该位置。
+        followup_ids = []
+        context = self.chat_context.build(session, book_id, text, followup_ids=followup_ids)
+        if followup_tool and followup_ids and not task:
+            function = followup_tool["function"]
+            params = function["parameters"]
+            fields = params["properties"]
+            kwargs["tool_definitions"].append({**followup_tool, "function": {**function, "parameters": {
+                **params, "properties": {**fields, "receipt_id": {**fields["receipt_id"], "enum": followup_ids}}}}})
         kwargs["items"].append({
             "item_type": "UserMessageItem",
             "meta": {"item_id": "maiweave-life-context", "logical_turn_id": None, "timestamp": self.now().isoformat(timespec="minutes")},
-            "parts": [{"type": "text", "text": self.context_text(session, book_id, text)}],
+            "parts": [{"type": "text", "text": context}],
         })
+        for tool in kwargs.get("tool_definitions", []):
+            function = tool.get("function", {})
+            if function.get("name") == "maiweave_show_life":
+                action = function.get("parameters", {}).get("properties", {}).get("action", {})
+                self.life_images.planner_actions[session] = action.get("enum", ("list", "send"))
+                break
         return {"action": "continue", "modified_kwargs": kwargs}
 
     @HookHandler("maisaka.planner.after_response")
     async def planner_receipt(self, session_id: str, output_items: list, **kwargs):
         original_items = output_items
-        output_items = distinct_image_calls(output_items)
+        output_items = distinct_image_calls(output_items, self.life_images.planner_actions.pop(session_id, None))
         self.living.receipts.observe(session_id, output_items)
         self.presence.observe_planner(session_id, output_items, self.now())
         self.living.observe_farewell(session_id, output_items, self.now())
         if not any(item.get("item_type") == "FunctionCallItem" for item in output_items):
             self.ctx.logger.info("MaiWeave Planner 响应 [%s]：%s；睡眠静默=%s",
                                  session_id, output_summary(output_items), self.living.quiet_sleep(self.now()))
-        if len(output_items) != len(original_items):
+        if output_items != original_items:
             return {"action": "continue", "modified_kwargs": {**kwargs, "session_id": session_id, "output_items": output_items}}
         return {"action": "continue"}
 
@@ -454,7 +482,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         record = self.presence.declare(session, user, status, self.now(), until)
         return {"status": record["status"], "expires_at": record["expires_at"]}
 
-    @Tool("maiweave_share_followup", description="用户接上此前主动分享时，关联分享与当前回应；聊完时标记 closed。", parameters=schema({
+    @Tool("maiweave_share_followup", visibility="visible", description="对方追问或评论 shared_topics 中的具体事情时，选对应的分享 ID 登记一次，再接着聊天。普通应声直接回复或等待。", parameters=schema({
         "receipt_id": text_field("shared_topics 中的分享 ID"), "summary": text_field("当前回应的要点"),
         "status": {"type": "string", "enum": ["answered", "closed"]}}, ["receipt_id", "summary", "status"]))
     @operation
@@ -677,7 +705,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         activity = current["title"] if current and self.engine.visible(current, session) else "正在处理其他安排" if current else "空闲"
         state = self.engine.state()
         message = (
-            f"MaiWeave 0.12.3\n启用：{self.config.life.enabled}\n当前：{activity}\n"
+            f"MaiWeave 0.12.4\n启用：{self.config.life.enabled}\n当前：{activity}\n"
             f"精力：{state['energy']:.0f}；饥饿：{state['hunger']:.0f}；心情：{state['mood']:.0f}\n"
             f"聊天流：{session}\n原生记忆连接：{'已配置' if self.config.memory.enabled else '未配置'}\n"
             f"最近运行错误：{self.last_error or '无'}"

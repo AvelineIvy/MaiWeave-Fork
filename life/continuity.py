@@ -253,6 +253,8 @@ class Continuity:
     def save_thread(self, title, context, session, due_at, now, thread_id="", source_ref="", expires_at=""):
         if not title.strip() or not context.strip():
             raise ValueError("跟进事项需要标题和具体上下文")
+        if not due_at:
+            raise ValueError("请按约定填写跟进时间 due_at，包含日期、时刻和时区。时间待定时先和对方商量。")
         due = self.engine.time(due_at)
         expires = self.engine.time(expires_at) if expires_at else due + timedelta(days=1)
         if expires <= due or expires <= now:
@@ -262,6 +264,7 @@ class Continuity:
                   "due_at": due.isoformat(), "created_at": old["created_at"] if old else now.isoformat(),
                   "status": "open", "source_ref": source_ref or (old or {}).get("source_ref", ""), "requested_at": "",
                   "expires_at": expires.isoformat(), "updated_at": now.isoformat()}
+        record.pop("resolved_at", None)
         with self.engine.store.db:
             self.engine.store.put("thread", record)
         return record

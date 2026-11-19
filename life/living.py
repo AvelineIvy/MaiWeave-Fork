@@ -829,7 +829,7 @@ class Living:
         result = []
         for session in dict.fromkeys([*cfg.session_ids, *(p["session_id"] for p in store.all("profile"))]):
             times = self.receipts.sent_times(session, now.tzinfo)
-            history = sorted([r for r in [*self.share_decisions, *store.all("share_receipt")] if r["session"] in {session, "全部"}], key=lambda r: r["created"], reverse=True)
+            history = sorted([r for r in [*self.share_decisions, *store.all("share_receipt")] if r["session"] in {session, "全部"}], key=lambda r: self.receipts.time(r["created"], now.tzinfo), reverse=True)
             latest = next((r for r in history if r["session"] in {session, "全部"}), {})
             pending = []
             for item in store.all("thread"):

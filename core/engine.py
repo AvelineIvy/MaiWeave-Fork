@@ -212,6 +212,8 @@ class LifeEngine:
         plan = self.owned("plan", value.plan_id, session) if value.plan_id else None
         if plan and plan["status"] == "completed":
             raise ValueError("该计划已经记录完成，请补充原经历")
+        if plan and plan["status"] == "cancelled":
+            raise ValueError("这项计划已取消。实际发生的事情可以作为独立经历保存。")
         if plan and occurred < self.time(plan["start"]):
             raise ValueError("经历时间早于关联计划，请核对计划 ID 和发生时间")
         if plan and plan["participants"] and value.source == "simulated":

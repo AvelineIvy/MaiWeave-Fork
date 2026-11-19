@@ -18,6 +18,29 @@ def continuity(x):
     return Continuity(x.engine, x.ctx, x.cfg)
 
 
+def test_cancelled_plan_stays_cancelled_when_recording_experience(life):
+    x = life
+    plan = x.engine.create_plan(PlanInput(title="散步", start=x.now.isoformat(),
+                                end=(x.now + timedelta(minutes=30)).isoformat()), "a", x.now)
+    x.engine.transition(plan["id"], "cancel", "a", x.now)
+    value = ExperienceInput(summary="出门散步了", evidence="用户陈述", occurred_at=x.now.isoformat(), plan_id=plan["id"])
+    with pytest.raises(ValueError, match="已取消"):
+        x.engine.record_experience(value, "a", x.now)
+    assert x.store.get("plan", plan["id"])["status"] == "cancelled"
+    assert not x.engine.experiences("a", "散步")
+    assert x.engine.record_experience(value.model_copy(update={"plan_id": ""}), "a", x.now)["source"] == "reported"
+
+
+async def test_reopened_thread_clears_previous_completion(plugin):
+    now = plugin.now()
+    flow = plugin.continuity
+    row = flow.save_thread("借书", "周末问问", "a", now.isoformat(), now)
+    flow.resolve_thread(row["id"], "a", now)
+    later = now + timedelta(days=2)
+    reopened = flow.save_thread("借书", "改天再问", "a", later.isoformat(), now, row["id"])
+    assert reopened["status"] == "open" and "resolved_at" not in reopened
+
+
 def living(x):
     return Living(x.engine, x.ctx, x.cfg, x.spatial, x.rhythm, x.world, continuity(x), None)
 

@@ -17,7 +17,7 @@ def parameters(properties, required):
 
 
 class FeatureTools:
-    @Tool("maiweave_show_life", visibility="visible", description="用户说“我想看看你”、想看自拍或刚做好的东西时，展示对应生活图片。先用list查近期经历，再用send填写experience_id和想看的画面。已有图片直接发送，新图生成后自动发到当前聊天。", parameters=parameters({
+    @Tool("maiweave_show_life", visibility="visible", description="给当前聊天发生活图片。对方明确想看画面（如“我想看看你”）时使用。本轮已有候选就选一个 ID 调 send 一次，需要选图时才调 list。普通接话、询问经过和分享文字话题，按聊天内容回复或等待。", parameters=parameters({
         "action": {"type": "string", "enum": ["list", "send"]},
         "experience_id": {"type": "string", "description": "要展示的生活经历编号"},
         "framing": {"type": "string", "maxLength": 300, "description": "当前用户希望展示的画面，如单手持机自拍、物件特写、麦麦做饭的样子；沿用当前请求，并填写本轮已明确的麦麦穿着；已有图片继续复用"},
@@ -27,7 +27,7 @@ class FeatureTools:
         session = kwargs["stream_id"]
         if action == "list":
             items = self.life_images.candidates(session)
-            return {"instruction": "选中经历后调用 send 一次。list 只列经历；提交后按 send 的回执结束本轮。",
+            return {"instruction": "本轮选图候选已列出，直接复用。对方明确要图且有合适候选时，用其 ID 调 send 一次；普通聊天、讲述细节或没有合适画面时，用 reply 接话或 wait 结束。",
                     "enabled": self.config.diary.chat_images_enabled and (self.config.diary.image_service_enabled or bool(items)),
                     "generation_enabled": self.config.diary.image_service_enabled, "items": items}
         if action != "send":
@@ -74,7 +74,9 @@ class FeatureTools:
             return self.books.navigate(action, book_id, chapter, self.spatial, self.now(), kwargs["stream_id"], kwargs.get("user_id", ""))
         if action == "select":
             return self.books.select(book_id)
-        return self.books.schedule(book_id, start, minutes, self.spatial, self.now(), kwargs["stream_id"], kwargs.get("user_id", ""), location=location)
+        if action == "schedule":
+            return self.books.schedule(book_id, start, minutes, self.spatial, self.now(), kwargs["stream_id"], kwargs.get("user_id", ""), location=location)
+        raise ValueError("未知书架操作")
 
     @Tool("maiweave_continuity", description="管理生活接续。status 查看偏好和持续事项；reflect 为已完成活动生成或重试具体结果；outline/revise_goal 分解或调整目标阶段；replan 根据临时事件重排可变动安排；save_thread 保存用户提到的起床、面试等值得到时关心的事情，填写 due_at 和具体 context；先用 status 查询已有事项，改时间时传原 record_id，取消或提前说结果时用 resolve_thread 结束原事项。用户作息同时用 maiweave_person_state 保存近况结束时间。", parameters=parameters({
         "action": {"type": "string", "enum": ["status", "reflect", "outline", "revise_goal", "replan", "save_thread", "resolve_thread"]},

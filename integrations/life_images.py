@@ -14,46 +14,93 @@ FINISH_IMAGE = "图片会自动发到当前聊天。还有文字要说时用 rep
 SENT_IMAGE = "图片已发到当前聊天。还有文字要说时用 reply 并设 after_reply=stop，否则用无时间参数的 wait 结束本轮。"
 
 
-def distinct_image_calls(items):
-    """同一次模型输出里，保留首次查询和每张图片的首次发送。"""
+def image_tool_relevant(items):
+    """按本次来信提供图片工具，也接受 Planner 在本轮主动找图。"""
+    for item in reversed(items):
+        call = item.get("tool_call") or {}
+        if call.get("func_name") == "tool_search":
+            query = str(call.get("args", {}).get("query", ""))
+            if re.search(r"maiweave_show_life|图片|照片|自拍|发图", query, re.I):
+                return True
+        if item.get("item_type") != "UserMessageItem":
+            continue
+        text = "".join(p.get("text", "") for p in item.get("parts", []) if p.get("type") == "text")
+        if text.startswith(("<plugin_proactive_task", "<internal_", "<subagent_result")):
+            return False
+        header, _, body = text.partition(">")
+        if header.startswith("<message ") and 'is_self_message="true"' not in header:
+            return bool(re.search(r"想看|看看|瞅瞅|瞧瞧|给我看|给你看|什么样|啥样|长啥样|照片|图片|拍张|拍一|自拍|发.{0,4}(张|图|来|给我)|photo|selfie|picture", body, re.I))
+    return True
+
+
+def distinct_image_calls(items, allowed=None):
+    """执行本轮提供的图片操作，同一批次中每张图片只发送一次。"""
     seen = set()
     kept = []
+    rejected = None
     for item in items:
         call = item.get("tool_call") or {}
         if item.get("item_type") == "FunctionCallItem" and call.get("func_name") == "maiweave_show_life":
             args = call.get("args") or {}
             action = args.get("action")
+            if allowed is not None and (action not in allowed or
+                                        (action == "send" and not args.get("experience_id"))):
+                rejected = item
+                continue
             if action == "list" or (action == "send" and isinstance(args.get("experience_id"), str)):
                 key = (action, args.get("experience_id") if action == "send" else "")
                 if key in seen:
                     continue
                 seen.add(key)
         kept.append(item)
+    if rejected and not any(i.get("item_type") == "FunctionCallItem" for i in kept):
+        # 只有失效图片操作时，用宿主的静默结束动作收尾。
+        kept.append({**rejected, "tool_call": {**rejected["tool_call"], "func_name": "wait", "args": {}}})
     return kept
 
 
-def image_request_handled(items, is_sent_image=None):
-    """从当前用户消息之后的工具回执识别已受理的发图。"""
-    calls = set()
-    handled = False
+def current_image_candidates(items):
+    """给 Planner 保留本轮的选图过程，上一轮的候选随消息翻篇。"""
+    old = set()
+    current = set()
+    for item in items:
+        if item.get("item_type") == "UserMessageItem":
+            text = next((p.get("text", "") for p in item.get("parts", []) if p.get("type") == "text"), "")
+            if (text.startswith("<message ") and 'is_self_message="true"' not in text.split(">", 1)[0]
+                    or text.startswith(("<plugin_proactive_task", "<internal_", "<subagent_result"))):
+                old.update(current)
+                current.clear()
+        elif item.get("item_type") == "FunctionCallItem":
+            call = item["tool_call"]
+            if call.get("func_name") == "maiweave_show_life" and call.get("args", {}).get("action") == "list":
+                current.add(call["call_id"])
+    if not old:
+        return items
+    return [i for i in items if (i.get("tool_call") or {}).get("call_id") not in old and i.get("call_id") not in old]
+
+
+def image_request_stage(items, is_sent_image=None):
+    """从本轮回执识别已列出的候选和已受理的发图。"""
+    calls = {}
+    stage = ""
     for item in items:
         kind = item.get("item_type")
         if kind == "UserMessageItem":
             text = next((p.get("text", "") for p in item.get("parts", []) if p.get("type") == "text"), "")
             header = text.split(">", 1)[0]
             incoming = text.startswith("<message ") and 'is_self_message="true"' not in header
-            if incoming and handled and is_sent_image:
+            if incoming and stage == "sent" and is_sent_image:
                 # 宿主同步 QQ 图片时，消息头可能只带回执编号。
                 message = re.search(r'\bmsg_id="([^"]+)"', header)
                 if message and is_sent_image(message[1]):
                     continue
             if incoming or text.startswith(("<plugin_proactive_task", "<internal_", "<subagent_result")):
                 calls.clear()
-                handled = False
+                stage = ""
         elif kind == "FunctionCallItem":
             call = item.get("tool_call", {})
-            if call.get("func_name") == "maiweave_show_life" and call.get("args", {}).get("action") == "send":
-                calls.add(call.get("call_id"))
+            if call.get("func_name") == "maiweave_show_life":
+                calls[call.get("call_id")] = call.get("args", {}).get("action")
         elif kind == "FunctionCallOutputItem" and calls and item.get("call_id") in calls:
             output = item.get("output")
             if isinstance(output, str):
@@ -61,9 +108,13 @@ def image_request_handled(items, is_sent_image=None):
                     output = json.loads(output)
                 except ValueError:
                     continue
-            if isinstance(output, dict) and output.get("status") in {"进行中", "正在生成，请稍等", "已发送"}:
-                handled = True
-    return handled
+            if isinstance(output, dict):
+                action = calls[item["call_id"]]
+                if action == "send" and output.get("status") in {"进行中", "正在生成，请稍等", "已发送"}:
+                    stage = "sent"
+                elif stage != "sent" and action == "list" and isinstance(output.get("items"), list):
+                    stage = "listed" if output["items"] else "empty"
+    return stage
 
 
 class LifeImages:
@@ -72,6 +123,7 @@ class LifeImages:
         self.store = engine.store
         self.images = DiaryImages(engine, ctx, config)
         self.pending_requests = set()
+        self.planner_actions = {}
         self.send_locks = WeakValueDictionary()
 
     @staticmethod
@@ -100,10 +152,17 @@ class LifeImages:
         for tool in definitions:
             function = tool.get("function", {})
             if function.get("name") == "maiweave_show_life":
-                if not enabled or image_request_handled(items, lambda mid: self.sent_image(session, mid)):
+                if not enabled or not image_tool_relevant(items):
+                    continue
+                stage = image_request_stage(items, lambda mid: self.sent_image(session, mid))
+                if stage in {"empty", "sent"}:
                     continue
                 if not self.config.diary.image_service_enabled:
-                    tool = {**tool, "function": {**function, "description": "展示当前聊天可用的已有生活图片。list查询已有图片的经历编号，send按experience_id将已有图片发到当前聊天。"}}
+                    tool = {**tool, "function": {**function, "description": "对方明确想看图片时展示已有生活图片。本轮已有候选就按 experience_id 调 send 一次，需要选图时才调 list。普通接话和文字分享使用 reply 或 wait。"}}
+                if stage == "listed":
+                    params = function["parameters"]
+                    properties = {**params["properties"], "action": {"type": "string", "enum": ["send"]}}
+                    tool = {**tool, "function": {**function, "description": "仅用于发送对方想看的照片。使用本轮候选中的 ID；讲述经历时直接用 reply。", "parameters": {**params, "properties": properties, "required": ["action", "experience_id"]}}}
             result.append(tool)
         return result
 

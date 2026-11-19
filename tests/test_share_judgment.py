@@ -52,16 +52,32 @@ async def test_sent_text_respects_chat_budget(plugin,budget,kind):
     assert len(plugin.living.receipts.context(kind,now))==3
 
 
-async def test_planner_receipt_collects_sent_segments(plugin):
+@pytest.mark.parametrize("quoted", [False, True])
+async def test_planner_receipt_collects_sent_segments(plugin, quoted):
     now=plugin.now()
     with plugin.store.db:
         plugin.store.put("share_receipt",{"id":"task","session":"chat-a","created":now.isoformat(),"outcome":"MaiBot 已受理","calls":{"call":"reply"}})
     async def get(table,**kwargs):
         if table=="ToolRecord":
-            return {"tool_name":"reply","timestamp":now.isoformat(),"tool_data":json.dumps({"success":True,"metadata":{"sent_message_ids":["one","two"]}})}
-        return {"timestamp":now.isoformat(),"processed_plain_text":{"one":"傍晚煮了面。","two":"这次加了蘑菇。"}[kwargs["filters"]["message_id"]]}
+            meta = {"sent_message_ids":["one","two"]}
+            if quoted:
+                meta["send_results"] = [{"success": True, "message_id": "one", "segment": "傍晚煮了面。", "set_quote": True},
+                                        {"success": True, "message_id": "two", "segment": "这次加了蘑菇。"}]
+            return {"tool_name":"reply","timestamp":now.isoformat(),"tool_data":json.dumps({"success":True,"metadata":meta})}
+        return {"timestamp":now.isoformat(),"processed_plain_text":{"one":("晚饭吃什么？ " if quoted else "")+"傍晚煮了面。","two":"这次加了蘑菇。"}[kwargs["filters"]["message_id"]]}
     plugin.ctx.db.get.side_effect=get
     await plugin.living.receipts.refresh(now)
     row=plugin.store.get("share_receipt","task")
     assert row["sent_text"]=="傍晚煮了面。\n这次加了蘑菇。"
     assert row["outcome"]=="实际已发送"
+
+
+async def test_latest_share_is_ordered_by_instant_across_offsets(plugin):
+    from datetime import datetime
+    now = datetime.fromisoformat("2026-06-02T10:00:00+08:00")
+    with plugin.store.db:
+        for key, stamp in [("first", "2026-06-02T08:00:00+08:00"), ("last", "2026-06-02T01:00:00+00:00")]:
+            plugin.store.put("share_receipt", {"id":key, "session":"a", "sent_at":stamp, "created":stamp})
+    plugin.living.receipts.receive("a", "user", "收到", now)
+    assert "observed_at" in plugin.store.get("share_receipt", "last")
+    assert plugin.living.receipts.history([], now.tzinfo)[0]["id"] == "last"
