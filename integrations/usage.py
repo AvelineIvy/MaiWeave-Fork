@@ -2,15 +2,40 @@
 
 import asyncio
 import json
+import re
 from datetime import datetime, timedelta
 from time import perf_counter
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+from pydantic import ValidationError
+
 from ..config import MODEL_FEATURES
 
+JSON_START = re.compile(r'\{|\[(?=\s*(?:[\[{"\]\d-]|true\b|false\b|null\b))')
 
-async def _once(ctx, store, config, feature, prompt):
+
+def _structured_result(text, model):
+    try:
+        return model.model_validate_json(text)
+    except ValidationError as error:
+        if error.errors()[0]["type"] != "json_invalid":
+            raise
+
+    # 标准解码器确定完整值的结尾，正文里的括号和引号按 JSON 字符串处理。
+    # 模型有时会在说明里举例，标明的代码块才是它提交的结果。
+    fence = re.search(r'^[ \t]*```(?:json\b)?\s*(?=[{\[])', text, re.IGNORECASE | re.MULTILINE)
+    start = JSON_START.search(text, fence.end() if fence else 0)
+    if not start:
+        raise ValueError("未找到完整的 JSON 结果")
+    _, end = json.JSONDecoder().raw_decode(text, start.start())
+    tail = text[end:].lstrip()
+    if tail.startswith(("}", "]", ",")) or JSON_START.search(tail):
+        raise ValueError("请返回一个完整的 JSON 结果")
+    return model.model_validate_json(text[start.start():end])
+
+
+async def _once(ctx, store, config, feature, prompt, model=None, validate=None):
     key = MODEL_FEATURES.get(feature)
     selected = getattr(config.models, key) if key else "跟随默认"
     task = config.life.model_task if selected == "跟随默认" else selected
@@ -21,15 +46,32 @@ async def _once(ctx, store, config, feature, prompt):
               "prompt_cache_hit_tokens": None}
     try:
         result = await asyncio.wait_for(ctx.llm.generate(prompt, task_name=task, timeout_ms=95000), timeout=90)
-        record.update(model=result.get("model") or result.get("model_name", ""),
-                      status="成功" if result["success"] else "失败", error=result.get("error", ""))
+        record["model"] = result.get("model") or result.get("model_name", "")
         for key in ("prompt_tokens", "completion_tokens", "total_tokens", "prompt_cache_hit_tokens"):
             record[key] = result.get(key)
         if result["success"] and result.get("response") and not any(
                 record[key] for key in ("prompt_tokens", "completion_tokens", "total_tokens")):
             for key in ("prompt_tokens", "completion_tokens", "total_tokens", "prompt_cache_hit_tokens"):
                 record[key] = None
-        return result
+        if not result["success"]:
+            raise RuntimeError(result.get("error") or "模型请求失败")
+        if model:
+            record["status"] = "结果解析失败"
+        text = result.get("response")
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("模型返回了空内容")
+        if model is None:
+            record["status"] = "成功"
+            return result
+        value = _structured_result(text.strip(), model)
+        if validate:
+            validate(value)
+        record["status"] = "成功"
+        return value
+    except ValidationError as error:
+        details = error.errors(include_input=False, include_url=False)
+        record["error"] = "；".join(f"{'.'.join(map(str, item['loc'])) or '结果'}：{item['msg']}" for item in details)
+        raise ValueError(record["error"]) from error
     except (Exception, asyncio.CancelledError) as error:
         record["error"] = str(error) or ("模型请求已取消" if isinstance(error, asyncio.CancelledError) else "模型请求超时" if isinstance(error, TimeoutError) else type(error).__name__)
         raise
@@ -40,33 +82,21 @@ async def _once(ctx, store, config, feature, prompt):
 
 
 async def generate(ctx, store, config, feature, prompt, model=None, validate=None, *, max_chars=0):
+    original_prompt = prompt
     for attempt in range(3):
         try:
-            result = await _once(ctx, store, config, feature, prompt)
-            if not result["success"]:
-                raise RuntimeError(result.get("error") or "模型请求失败")
-            text = result["response"].strip()
-            if not text:
-                raise ValueError("模型返回了空内容")
-            if model:
-                if text.startswith("```"):
-                    text = "\n".join(text.splitlines()[1:-1])
-                value = model.model_validate_json(text)
-                if validate:
-                    validate(value)
-                return value
-            return result
+            return await _once(ctx, store, config, feature, prompt, model, validate)
         except (TimeoutError, ConnectionError, OSError, RuntimeError, ValueError) as error:
             if attempt == 2:
                 raise
             ctx.logger.warning("%s第%s次调用失败，将重试：%s", feature, attempt + 1, error)
             if isinstance(error, ValueError):
-                correction = "\n请重新输出，修正上次结果的问题：" + str(error)
+                correction = ("\n只输出一个符合要求的 JSON 值，省略说明和代码块。请修正：" if model else "\n请重新输出：") + str(error)
                 if max_chars:
-                    correction = correction[:300]
-                    prompt = prompt[:max_chars - len(correction)] + correction
+                    correction = correction[:min(300, max_chars)]
+                    prompt = original_prompt[:max_chars - len(correction)] + correction
                 else:
-                    prompt += correction
+                    prompt = original_prompt + correction
             await asyncio.sleep(2 ** attempt)
 
 

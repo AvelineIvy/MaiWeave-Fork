@@ -142,7 +142,7 @@ class PlanPromise(BaseModel):
     evidence: str = Field(min_length=1, max_length=500)
 
 
-class ChatArrangements(BaseModel):
+class ChatArrangements(BaseModel, extra="forbid"):
     arrangements: list[ChatArrangement] = Field(default_factory=list, max_length=8)
     promises: list[PlanPromise] = Field(default_factory=list, max_length=8)
 
