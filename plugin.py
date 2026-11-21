@@ -117,6 +117,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
             ("profile", "life", "角色设定", "时区已有默认值，背景和兴趣按需补充。", ["timezone", "interests", "background"]),
             ("sleep", "life", "日常作息", "关闭作息可全天候交流；开启后按 24 小时制安排睡眠。", ["schedule_enabled", "nap_quiet", "sleep_skip_private_planner", "sleep_hour", "wake_hour"]),
             ("wake", "life", "睡眠唤醒", "设置私聊唤醒概率、唤醒词语和醒来后留给聊天的时间。", ["wake_enabled", "private_wake_probability", "wake_minutes", "wake_keywords"]),
+            ("economy", "life", "经济设置", "设置麦麦开始生活时的存款。", ["opening_balance"]),
             ("planning", "life", "更新与规划", "设置生活推进和自主规划的检查间隔。", ["tick_seconds", "planning_interval_minutes"]),
             ("weather", "world", "实时天气", "填写城市，查看当地天气和预报。", ["weather_enabled", "weather_provider", "weather_api_key", "city", "country_code"]),
             ("explore", "world", "自主见闻", "安排时间了解感兴趣的事，再把发现带回生活。", ["explore_enabled", "explore_topics", "explore_daily_limit", "explore_interval_minutes"]),
@@ -171,7 +172,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
             }
         schema["layout"] = {"type": "tabs", "tabs": [
             {"id": "life", "title": "角色与作息", "sections": ["life", "profile", "sleep", "wake", "dreams"], "order": 0},
-            {"id": "growth", "title": "日程与成长", "sections": ["rhythm", "continuity", "reading_rhythm", "diary"], "order": 1},
+            {"id": "growth", "title": "日程与成长", "sections": ["rhythm", "economy", "continuity", "reading_rhythm", "diary"], "order": 1},
             {"id": "world", "title": "天气与见闻", "sections": ["weather", "explore", "news", "search"], "order": 2},
             {"id": "context", "title": "聊天上下文", "sections": ["context"], "order": 3},
             {"id": "connections", "title": "交流与记忆", "sections": ["proactive", "limits", "quota", "memory"], "order": 4},
@@ -206,6 +207,9 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         self.anniversaries = Anniversaries(self.store)
         self.reviews = Reviews(self)
         self.engine = LifeEngine(self.store, self.config.life.timezone, self.now())
+        wallet = self.engine.wallet
+        if wallet.account()["opening"] != self.config.life.opening_balance and not self.store.count("payment"):
+            wallet.set_opening(self.config.life.opening_balance)
         self.retention = Retention(self.store, self.config, self.ctx.paths.data_dir)
         self.spatial = Spatial(self.engine)
         self.world = World(self.engine, self.ctx, self.config)

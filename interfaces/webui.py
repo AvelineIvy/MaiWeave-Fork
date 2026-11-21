@@ -792,10 +792,6 @@ class WebUI:
                            for p in plans
                            if p["kind"] == "work" and p["status"] in {"active", "scheduled"}][:30]}
 
-    @API("ui_wallet_opening", description="设置第一笔收支前的起始生活费")
-    async def ui_wallet_opening(self, amount: int) -> dict:
-        return self.engine.wallet.set_opening(amount)
-
     @API("ui_save_place", description="添加或编辑地点")
     async def ui_save_place(self, name: str, outdoor: bool = False, description: str = "", place_id: str = "") -> dict:
         return self.spatial.save_place(name, outdoor, description, place_id)

@@ -14,7 +14,7 @@ async def test_shift_move_leave_and_settlement_after_restart(plugin, monkeypatch
     p = plugin
     now = p.now().replace(hour=8, minute=0, second=0, microsecond=0) + timedelta(days=1)
     monkeypatch.setattr(p, "now", lambda: now)
-    await p.ui_wallet_opening(20)
+    p.engine.wallet.set_opening(20)
     await p.ui_save_place("花店")
     await p.ui_save_route("住处", "花店", 10, "公交", fare=2)
     rule = await p.ui_save_routine("花店早班", now.date().isoformat(), "10:00", 60,
@@ -55,7 +55,7 @@ async def test_private_loan_to_wages_and_repayment(plugin, monkeypatch, mode):
         with p.store.db:
             p.store.put("profile", {"id": peer["stream_id"], "name": "小林", "session_id": peer["stream_id"],
                 "user_id": peer["user_id"], "intimacy_mode": "manual", "intimacy": 2})
-    await p.ui_wallet_opening(2)
+    p.engine.wallet.set_opening(2)
     wallet = p.engine.wallet
     wallet.need("买毛线", 10, "", now)
     await p.living.share(now)
@@ -113,7 +113,7 @@ async def test_shortfall_purchase_and_gift(plugin, monkeypatch, action, credited
     p.config.life.autonomous = True
     with p.store.db:
         p.store.put("state", {**p.engine.state(), "updated_at": now.isoformat()})
-    await p.ui_wallet_opening(2)
+    p.engine.wallet.set_opening(2)
     p.ctx.llm.generate.side_effect = None
     p.ctx.llm.generate.return_value = {"success": True, "response": json.dumps(dict(title="买毛线", location="住处",
         kind="leisure", minutes=15, cost=10, motivation="给兔子织围巾"))}
@@ -140,3 +140,18 @@ async def test_shortfall_purchase_and_gift(plugin, monkeypatch, action, credited
         p.engine.wallet.need("买毛线", 10, "", now + timedelta(days=1))
         assert len(p.store.all("money_request")) == 1
         assert not p.store.all("payment")
+
+
+async def test_opening_balance_config_reload(plugin):
+    p = plugin
+    cfg = p.get_plugin_config_data()
+    cfg["life"]["opening_balance"] = 0
+    p.set_plugin_config(cfg)
+    await p.on_config_update("self", cfg, "0.12.6")
+    assert (await p.ui_dashboard())["wallet"]["balance"] == 0
+    with p.store.db:
+        p.engine.wallet._post("测试工钱", 35, "工钱", p.now())
+    cfg["life"]["opening_balance"] = 200
+    p.set_plugin_config(cfg)
+    await p.on_config_update("self", cfg, "0.12.6")
+    assert (await p.ui_dashboard())["wallet"]["balance"] == 35
