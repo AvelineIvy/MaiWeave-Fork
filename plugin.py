@@ -117,7 +117,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
             ("profile", "life", "角色设定", "时区已有默认值，背景和兴趣按需补充。", ["timezone", "interests", "background"]),
             ("sleep", "life", "日常作息", "关闭作息可全天候交流；开启后按 24 小时制安排睡眠。", ["schedule_enabled", "nap_quiet", "sleep_skip_private_planner", "sleep_hour", "wake_hour"]),
             ("wake", "life", "睡眠唤醒", "设置私聊唤醒概率、唤醒词语和醒来后留给聊天的时间。", ["wake_enabled", "private_wake_probability", "wake_minutes", "wake_keywords"]),
-            ("economy", "life", "经济设置", "设置麦麦开始生活时的存款。", ["opening_balance"]),
+            ("economy", "life", "经济设置", "设置麦麦开始生活时的存款。", ["opening_balance", "currency_name"]),
             ("planning", "life", "更新与规划", "设置生活推进和自主规划的检查间隔。", ["tick_seconds", "planning_interval_minutes"]),
             ("weather", "world", "实时天气", "填写城市，查看当地天气和预报。", ["weather_enabled", "weather_provider", "weather_api_key", "city", "country_code"]),
             ("explore", "world", "自主见闻", "安排时间了解感兴趣的事，再把发现带回生活。", ["explore_enabled", "explore_topics", "explore_daily_limit", "explore_interval_minutes"]),
@@ -208,6 +208,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         self.reviews = Reviews(self)
         self.engine = LifeEngine(self.store, self.config.life.timezone, self.now())
         wallet = self.engine.wallet
+        wallet.currency_name = self.config.life.currency_name.strip()
         if wallet.account()["opening"] != self.config.life.opening_balance and not self.store.count("payment"):
             wallet.set_opening(self.config.life.opening_balance)
         self.retention = Retention(self.store, self.config, self.ctx.paths.data_dir)
@@ -481,7 +482,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
 
     @Tool("maiweave_wallet", description="私聊中查看麦麦的虚拟钱包和与当前用户的借款。对方明确借出用lend、赠送用give、以后再给用promise、拒绝用decline。先查询list取得申请ID，金额沿用申请。", parameters=schema({
         "action": {"type": "string", "enum": ["list", "lend", "give", "promise", "decline"]},
-        "amount": {"type": "integer", "minimum": 0, "description": "明确给出的虚拟元数，省略表示申请金额"},
+        "amount": {"type": "integer", "minimum": 0, "description": "明确给出的整数金额，省略表示申请金额"},
         "request_id": text_field("本次借款申请ID")}, ["action"]))
     @operation
     async def wallet_action(self, action: str, request_id: str = "", amount: int = 0, **kwargs):
@@ -491,9 +492,9 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
             raise ValueError("请在私聊里处理虚拟钱包")
         wallet = self.engine.wallet
         if action == "list":
-            return {"balance": wallet.account()["balance"], "requests": [
+            return {"currency_name": wallet.currency_name, "balance": wallet.account()["balance"], "requests": [
                 r for r in self.store.all("money_request") if r["session"] == session and r["user"] == user][-5:]}
-        return wallet.respond(request_id, session, user, action, self.now(), amount)
+        return {**wallet.respond(request_id, session, user, action, self.now(), amount), "currency_name": wallet.currency_name}
 
     @Tool("maiweave_person_state", description="记录当前发言人此刻的短期状态。用户说明起床、忙完或返回时间时，用 until 保存结束时间；值得到时关心的事情同时用 maiweave_continuity 的 save_thread 保存。用户改时间时更新近况和原跟进事项，已醒来或忙完时记录空闲并结束对应事项。", parameters=schema({"status": {"type": "string", "enum": ["准备睡觉", "忙碌", "外出", "空闲"]}, "until": text_field("近况结束时间，带时区的 ISO 日期时间；省略时使用该状态的默认时长")}, ["status"]))
     @operation

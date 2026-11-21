@@ -352,7 +352,7 @@ class WebUI:
             index = next((i for i, row in enumerate(reversed(rows)) if row["id"] == record_id), None)
             if index is not None:
                 page = index // 20 + 1
-        return page_tables({"today": self.now().date().isoformat(), "records": rows[::-1], "total": len(rows), "profiles": [{"id": p["id"], "name": p["name"]} for p in self.store.all("profile")],
+        return page_tables({"currency_name": self.engine.wallet.currency_name, "today": self.now().date().isoformat(), "records": rows[::-1], "total": len(rows), "profiles": [{"id": p["id"], "name": p["name"]} for p in self.store.all("profile")],
                 "places": [{"id": p["id"], "name": p["name"]} for p in self.store.all("place")], "memory_enabled": self.config.memory.enabled}, page, ['records'])
 
     @API("ui_anniversaries", description="个人资料和纪念日")
@@ -770,7 +770,7 @@ class WebUI:
         return {**self.life_map(plans), **self.wallet_summary()}
 
     def wallet_summary(self):
-        return {"wallet": self.engine.wallet.account(),
+        return {"currency_name": self.engine.wallet.currency_name, "wallet": self.engine.wallet.account(),
                 "payments": self.store.page("payment", size=20, time_field="at")["items"],
                 "loans": self.store.all("money_request")[-10:]}
 

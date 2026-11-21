@@ -152,6 +152,13 @@ async def test_opening_balance_config_reload(plugin):
     with p.store.db:
         p.engine.wallet._post("测试工钱", 35, "工钱", p.now())
     cfg["life"]["opening_balance"] = 200
+    cfg["life"]["currency_name"] = "麦币"
     p.set_plugin_config(cfg)
     await p.on_config_update("self", cfg, "0.12.6")
-    assert (await p.ui_dashboard())["wallet"]["balance"] == 35
+    dashboard = await p.ui_dashboard()
+    assert dashboard["wallet"]["balance"] == 35
+    assert dashboard["currency_name"] == "麦币"
+    wallet = p.engine.wallet
+    wallet.need("花束包装纸", 40, "", p.now())
+    request, = wallet.pending(p.now())
+    assert "5麦币" in wallet.notice(request, "chat-a", "伙伴")[1]

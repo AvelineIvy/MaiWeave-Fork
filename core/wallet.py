@@ -6,6 +6,7 @@ from uuid import uuid4
 class Wallet:
     def __init__(self, store):
         self.store = store
+        self.currency_name = "虚拟元"
 
     def account(self):
         return self.store.find("runtime", "wallet") or {"id": "wallet", "opening": 100, "balance": 100}
@@ -33,9 +34,9 @@ class Wallet:
         if cost or plan.get("pay"):
             experience = self.store.get("experience", plan["experience_id"])
             if cost:
-                experience["details"]["生活支出"] = f"{cost}虚拟元"
+                experience["details"]["生活支出"] = f"{cost}{self.currency_name}"
             if plan.get("pay"):
-                experience["details"]["工作报酬"] = f"{plan['pay']}虚拟元"
+                experience["details"]["工作报酬"] = f"{plan['pay']}{self.currency_name}"
             self.store.put("experience", experience)
         if plan.get("purchase_request"):
             request = self.store.get("money_request", plan["purchase_request"])
@@ -62,7 +63,7 @@ class Wallet:
         if not rows:
             return "暂无"
         row = rows[-1]
-        return f"{row['title']}预计{row['price']}元，{row['status']}。决定去办时沿用原活动标题，手头紧可安排免费的活动。"
+        return f"{row['title']}预计{row['price']}{self.currency_name}，{row['status']}。决定去办时沿用原活动标题，手头紧可安排免费的活动。"
 
     def purchase_for(self, session, title, continuation_id):
         return next((r["id"] for r in reversed(self.store.all("money_request"))
@@ -113,7 +114,7 @@ class Wallet:
         with self.store.db:
             request.update(session=session, user=user, amount=gap)
             self.store.put("money_request", request)
-        return ("wallet:" + request["id"], f"为「{request['title']}」还差{gap}元虚拟生活费，可以私下问对方借，领工钱后还。", None)
+        return ("wallet:" + request["id"], f"为「{request['title']}」还差{gap}{self.currency_name}，可以私下问对方借，领工钱后还。", None)
 
     def current_notice(self, receipt, now):
         key = receipt.get("record_id", "")
@@ -137,7 +138,7 @@ class Wallet:
             if action in {"lend", "give"}:
                 limit = min(row["amount"], row["price"] - self.account()["balance"])
                 if amount < 0 or amount > limit:
-                    raise ValueError(f"这笔生活费还差{limit}元，请核对金额")
+                    raise ValueError(f"这笔生活费还差{limit}{self.currency_name}，请核对金额")
                 row["amount"] = amount or limit
                 self._post("来款:" + key, row["amount"], status + " · " + row["title"], now)
             row.update(status=status, owed=row["amount"] if action == "lend" else 0)

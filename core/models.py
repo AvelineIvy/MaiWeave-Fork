@@ -60,7 +60,7 @@ class ExperienceInput(BaseModel):
 
 
 class ActivityChoice(BaseModel):
-    cost: int = Field(default=0, ge=0, description="本次实际购买商品或用餐的预计支出，虚拟元")
+    cost: int = Field(default=0, ge=0, description="本次实际购买商品或用餐的预计支出，按钱包单位填写")
     continuation_id: str = ""
     title: str = Field(min_length=1, max_length=160)
     kind: Kind = Field(description="cook 表示做饭，meal 表示吃饭；合并安排时明确包含吃饭并预留用餐时间。")
@@ -149,7 +149,7 @@ class ChatArrangements(BaseModel, extra="forbid"):
 
 
 class RoutineInput(BaseModel):
-    pay: int = Field(default=0, ge=0, description="每班报酬，单位为虚拟元")
+    pay: int = Field(default=0, ge=0, description="每班报酬，按钱包单位填写")
     title: str = Field(min_length=1, max_length=160)
     frequency: Literal["daily", "weekly", "monthly"] = "weekly"
     interval: int = Field(default=1, ge=1, le=52)
@@ -178,7 +178,7 @@ class ActivityMeaning(BaseModel):
 
 
 class ActivityOutcome(ActivityMeaning, SharingScore):
-    hourly_pay: int = Field(default=0, ge=0, description="这次经历里遇到的临时工作时薪，虚拟元")
+    hourly_pay: int = Field(default=0, ge=0, description="这次经历里遇到的临时工作时薪，按钱包单位填写")
     new_followup: str = Field(default="", max_length=300, description="上一件已收尾的事接着办完后，本次新发现的下一件事")
     next_date: date | None = None
     summary: str = Field(min_length=1, max_length=1500)

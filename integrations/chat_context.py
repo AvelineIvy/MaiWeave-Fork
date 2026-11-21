@@ -164,8 +164,8 @@ class ChatContext:
         if not group:
             requests = [r for r in store.all("money_request") if r["session"] == session
                         and r["user"] == self.speakers.get(session)]
-            if requests and any(w in text for w in ("借", "钱", "还款", "给你", "送你", "工资", "元")):
-                add("虚拟钱包", {"余额": engine.wallet.account()["balance"], "最近借款":
+            if requests and any(w in text for w in ("借", "钱", "还款", "给你", "送你", "工资", "元", engine.wallet.currency_name)):
+                add("虚拟钱包", {"货币名称": engine.wallet.currency_name, "余额": engine.wallet.account()["balance"], "最近借款":
                     select_fields(requests[-1], ("id", "title", "amount", "status", "owed")), "工具": "maiweave_wallet"}, True)
         def rows(category):
             return [r for r in store.all(category) if engine.visible(r, session)]

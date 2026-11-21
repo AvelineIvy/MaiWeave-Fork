@@ -27,7 +27,8 @@ class LifeConfig(PluginConfigBase):
 
     __ui_label__ = "角色生活"
     enabled: bool = setting("启用生活引擎", default=True, description="控制生活推进和对话工具")
-    opening_balance: int = setting("起始存款（虚拟元）", default=100, ge=0, description="第一笔收支前可调整，开始记账后按实际收支计算余额。")
+    currency_name: str = setting("货币名称", default="虚拟元", min_length=1, pattern=r"\S", description="显示在金额后的名称，例如麦币、星星。")
+    opening_balance: int = setting("起始存款", default=100, ge=0, description="第一笔收支前可调整，开始记账后按实际收支计算余额。")
     autonomous: bool = setting("自主安排活动", default=True, description="空闲时由角色选择活动")
     timezone: str = setting("生活时区（必填）", default="Asia/Shanghai", description="已填中国标准时间，可直接使用；其他地区例如 Asia/Tokyo。")
     model_task: str = setting("默认生活模型（必填）", default="utils", description="从 MaiBot 已配置的模型任务中选择，默认 utils；任务选项在插件加载时更新。")

@@ -32,7 +32,7 @@ dialog{top:calc(var(--maibot-viewport-top,0px) + 88px);bottom:auto;margin:0 auto
 <main id="content" class="grid" hidden>
 <section class="card hero"><div class="hero-top"><div><div class="tags" id="tags"></div><h2 id="activity"></h2><p id="where" class="description"></p></div><div class="clock"><b id="clock"></b><small id="date"></small></div></div><p id="reason" class="description" style="margin-top:14px"></p><div id="activityProgress"><div class="progress"><span id="progressFill"></span></div><div class="between"><span id="progressText"></span><span id="endTime"></span></div></div><div id="next" class="next"></div><nav class="links" aria-label="生活快捷入口"><button class="btn primary" data-page="schedule">查看日程 →</button><button class="btn" data-page="books">我的书架</button><button class="btn" data-page="diary">翻开日记</button></nav></section>
 <section class="card"><div class="section-title"><h2>麦麦的近况</h2><small id="sleepMode"></small></div><div class="vitals" id="vitals"></div><div class="feel"><span>心情 · <strong id="moodLabel"></strong></span><b id="moodValue"></b><small id="sleepDebt"></small></div>
-<section class="wallet"><div class="between"><h3>存款</h3><span><b id="walletBalance"></b> 虚拟元</span></div>
+<section class="wallet"><div class="between"><h3>存款</h3><span><b id="walletBalance"></b> <span id="walletUnit"></span></span></div>
 <div class="ledger"><div><h4>最近收支</h4><ul id="paymentList"></ul></div><div><h4>私聊借还</h4><ul id="loanList"></ul></div></div></section></section>
 <section class="card wide"><div class="section-title"><h2>生活地图</h2><button class="btn" data-page="space">管理地点与路线 →</button></div>
 <div class="map-layout"><div class="map-board" id="mapBoard" role="group" aria-label="生活地点"></div>
@@ -72,7 +72,7 @@ return `<article class="share-recipient"><div class="share-top"><div class="shar
 }).join('')||'<p class="empty">在个人资料中选择交流聊天流，开启主动交流。</p>';
 }
 let chosenPlace='';
-function paintMap(map){
+function paintMap(map,unit){
  const select=$('mapPlace'),board=$('mapBoard'),details=$('mapDetails');
  const places=map.places;
  const place=places.find(p=>p.id===chosenPlace)||places.find(p=>p.name===map.location)||places[0];
@@ -81,7 +81,7 @@ function paintMap(map){
  select.replaceChildren();
  board.replaceChildren();details.replaceChildren();
  if(!place)return;
- function choose(id){chosenPlace=id;paintMap(map)}
+ function choose(id){chosenPlace=id;paintMap(map,unit)}
  select.onchange=()=>choose(select.value);
  // 坐标对应底图上的建筑。同一处建筑的房间共用标记，详情仍按具体地点读取。
  const landmarks=[
@@ -149,20 +149,22 @@ function paintMap(map){
   details.append(heading,list);
  }
  group('从这里出发',map.routes.filter(r=>r.origin===place.id||r.destination===place.id).map(r=>
-  (r.origin===place.id?r.destination_name:r.origin_name)+' · '+r.mode+' '+r.minutes+' 分钟'+(r.fare?' · '+r.fare+' 元':'')));
+  (r.origin===place.id?r.destination_name:r.origin_name)+' · '+r.mode+' '+r.minutes+' 分钟'+(r.fare?' · '+r.fare+' '+unit:'')));
  const when=r=>r.at.slice(5,16).replace('T',' ')+' · '+r.title;
- group('接下来的班次',map.shifts.filter(r=>r.location===place.name).slice(0,3).map(r=>when(r)+' · '+r.pay+' 元'));
+ group('接下来的班次',map.shifts.filter(r=>r.location===place.name).slice(0,3).map(r=>when(r)+' · '+r.pay+' '+unit));
  group('最近来过',map.visits.filter(r=>r.location===place.name).slice(-2).reverse().map(when));
 }
 function paintWallet(d){
+ const unit=d.currency_name;
+ $('walletUnit').textContent=unit;
  $('walletBalance').textContent=d.wallet.balance;
- const entries=d.payments.map(r=>r.at.slice(5,16).replace('T',' ')+' · '+r.title+' '+(r.amount>0?'+':'')+r.amount+' 元');
- const loans=d.loans.slice().reverse().map(r=>r.title+' · '+r.status+' · '+r.amount+' 元'+(r.owed?'（待还 '+r.owed+' 元）':''));
+ const entries=d.payments.map(r=>r.at.slice(5,16).replace('T',' ')+' · '+r.title+' '+(r.amount>0?'+':'')+r.amount+' '+unit);
+ const loans=d.loans.slice().reverse().map(r=>r.title+' · '+r.status+' · '+r.amount+' '+unit+(r.owed?'（待还 '+r.owed+' '+unit+'）':''));
  for(const [id,rows,empty] of [['paymentList',entries,'还没有收支'],['loanList',loans,'还没有借还记录']]){
   $(id).replaceChildren(...(rows.length?rows:[empty]).map(text=>{const li=document.createElement('li');li.textContent=text;return li}));
  }
 }
-function render(){const d=data;paintMap(d.map);paintWallet(d);$('content').hidden=false;$('diagnostics').hidden=false;$('loading').hidden=true;$('refreshTime').textContent='更新于 '+time(d.now);$('activity').textContent=d.activity;$('tags').innerHTML=`<span class="pill"><span class="dot"></span>${esc(d.sleep)}</span><span class="pill">${esc(d.enabled)}</span><span class="pill">${esc(d.current?.kind_label||'自在时刻')}</span>`;$('where').textContent=d.location+(d.weather?' · '+d.weather.city+' '+d.weather.label+' '+d.weather.temperature+'℃'+(d.weather.stale?'（上次观测）':''):' · 天气尚未更新');$('reason').textContent=d.current?.motivation||d.planning_status;$('next').innerHTML=`<span class="next-label">接下来</span><div><b>${esc(d.upcoming?.title||'留一点空白，下一步再安排')}</b><div class="muted">${esc(d.upcoming?time(d.upcoming.start)+' · '+(d.upcoming.location||'当前地点'):d.planning_status)}</div></div>`;paintProgress();$('sleepMode').textContent=d.schedule_mode;
+function render(){const d=data;paintMap(d.map,d.currency_name);paintWallet(d);$('content').hidden=false;$('diagnostics').hidden=false;$('loading').hidden=true;$('refreshTime').textContent='更新于 '+time(d.now);$('activity').textContent=d.activity;$('tags').innerHTML=`<span class="pill"><span class="dot"></span>${esc(d.sleep)}</span><span class="pill">${esc(d.enabled)}</span><span class="pill">${esc(d.current?.kind_label||'自在时刻')}</span>`;$('where').textContent=d.location+(d.weather?' · '+d.weather.city+' '+d.weather.label+' '+d.weather.temperature+'℃'+(d.weather.stale?'（上次观测）':''):' · 天气尚未更新');$('reason').textContent=d.current?.motivation||d.planning_status;$('next').innerHTML=`<span class="next-label">接下来</span><div><b>${esc(d.upcoming?.title||'留一点空白，下一步再安排')}</b><div class="muted">${esc(d.upcoming?time(d.upcoming.start)+' · '+(d.upcoming.location||'当前地点'):d.planning_status)}</div></div>`;paintProgress();$('sleepMode').textContent=d.schedule_mode;
 $('vitals').innerHTML=[['精力',d.state.energy,'--accent',d.state.energy<30?'想歇一会儿':'还有余力'],['饥饿',d.state.hunger,'--warm',d.state.hunger>70?'该吃点东西了':'肚子还舒服'],['压力',d.state.stress,'--violet',d.state.stress>70?'需要放松':'节奏平稳']].map(([label,value,color,hint])=>`<div class="vital"><div class="vital-head"><span>${label} <small>· ${hint}</small></span><b>${Math.round(value)}<small> /100</small></b></div><div class="progress"><span style="width:${value}%;background:var(${color})"></span></div></div>`).join('');$('moodLabel').textContent=d.mood_label;$('moodValue').textContent=(d.state.mood>0?'+':'')+Math.round(d.state.mood)+' / 100';$('sleepDebt').textContent='睡眠债 '+d.state.sleep_debt.toFixed(1)+' 小时';
 $('timelineTitle').textContent=d.day+' · '+['昨天留下的轨迹','今天正在发生','明天已有的安排'][day+1];document.querySelectorAll('[data-day]').forEach(b=>b.setAttribute('aria-pressed',Number(b.dataset.day)===day));$('timeline').innerHTML=d.timeline.map((p,i)=>`<button class="segment" style="left:${p.start_minute/14.4}%;width:${(p.end_minute-p.start_minute)/14.4}%;--segment:${colors[p.kind]}" data-plan="${i}" aria-label="${esc(p.time_label+' '+p.title)}" title="${esc(p.time_label+' '+p.title)}"></button>`).join('')+(day===0?`<span class="now-line" style="left:${(Number(d.now.slice(11,13))*60+Number(d.now.slice(14,16)))/14.4}%"></span>`:'');$('legend').innerHTML=[...new Map(d.timeline.map(p=>[p.kind,p.kind_label]))].map(([kind,label])=>`<span><i style="--segment:${colors[kind]}"></i>${esc(label)}</span>`).join('');$('agenda').innerHTML=d.timeline.length?d.timeline.map((p,i)=>`<button class="agenda-item ${p.status==='active'?'active':''}" style="--segment:${colors[p.kind]}" data-plan="${i}"><small>${esc(p.time_label)} · ${esc(p.status_label)}</small><b>${esc(p.title)}</b><small>${esc(p.location||'当前地点')} · ${esc(p.kind_label)}</small></button>`).join(''):'<p class="empty">这一天还没有安排。</p>';$('timelineNote').textContent=d.timeline_total>200?'展示前200项，完整记录可到日程页翻阅。':'点击时间条或活动，查看安排详情。';document.querySelectorAll('[data-plan]').forEach(b=>b.onclick=()=>detail(d.timeline[Number(b.dataset.plan)]));paintChart();
 $('moments').innerHTML=d.moments.length?d.moments.map(m=>`<article class="moment"><small>${esc(m.time.slice(5,16))} · ${esc(m.source)} · ${m.importance}分</small><p>${esc(m.summary)}</p></article>`).join(''):'<p class="empty">今天的小事，会慢慢留在这里。</p>';

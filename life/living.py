@@ -600,7 +600,7 @@ class Living:
                 "时长按这次想完成的小事选择：随手收拾、坐一会儿可用10至20分钟；读一段、做一道菜按内容与空档安排。"
                 "疲惫或兴趣一般时选短一点，有具体兴致时可多留些时间。空闲也可以安静歇一会儿。"
                 f"最近打算花的钱：{spending_note}。"
-                f"钱包有{wallet.account()['balance']}元虚拟生活费。买材料或外食时cost填本次实际消费的整数元，使用现有物品填0，车费沿用路线。量入为出。"
+                f"钱包有{wallet.account()['balance']}{wallet.currency_name}。买材料或外食时cost填本次实际消费的整数金额，使用现有物品填0，车费沿用路线。量入为出。"
                 "固定职业和班次沿用已排的工作日程。可接续念头有hourly_pay时，可在原地点做这份零工，kind选work并填写continuation_id；结合时薪、兴趣和空闲决定。"
                 f"此刻的习惯候选：{json.dumps(habit, ensure_ascii=False)}；目标下一步：{json.dumps(step, ensure_ascii=False)}；"
                 f"可接续的具体念头：{json.dumps(candidates, ensure_ascii=False)}。"
@@ -731,7 +731,7 @@ class Living:
         price = cost + sum(leg.get("fare", 0) for leg in route["legs"])
         if price and price > wallet.account()["balance"] and kind != "sleep":
             wallet.need(title, price, session, now, continuation_id)
-            return f"暂缓{title}，生活费还差{price - wallet.account()['balance']}元"
+            return f"暂缓{title}，生活费还差{price - wallet.account()['balance']}{wallet.currency_name}"
         value = PlanInput(title=title, book_id=book_id, start=start.isoformat(), end=(start + timedelta(minutes=minutes)).isoformat(),
                           kind=kind, location=location, motivation=motivation, goal_id=goal_id, goal_step_id=goal_step_id,
                           continuation_id=continuation_id, research_query=research_query, research_freshness=research_freshness)
@@ -995,7 +995,7 @@ class Living:
                         notices.append(notice)
             for request in engine.store.all("money_request"):
                 if request["status"] == "已还清" and request["session"] == session:
-                    notices.append(("repayment:" + request["id"], f"工钱已经到账，也还清了为「{request['title']}」借的{request['amount']}元虚拟生活费，向对方报个信。", None))
+                    notices.append(("repayment:" + request["id"], f"工钱已经到账，也还清了为「{request['title']}」借的{request['amount']}{wallet.currency_name}，向对方报个信。", None))
             for item in Anniversaries(engine.store).upcoming(now.date(), session):
                 if item["enabled"] and item["days_left"] == 0:
                     notices.append((f"anniversary:{item['id']}:{item['next_date']}",
