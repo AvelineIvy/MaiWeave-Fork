@@ -15,23 +15,14 @@ dialog{top:calc(var(--maibot-viewport-top,0px) + 88px);bottom:auto;margin:0 auto
 .dialog-header{position:sticky;top:-24px;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:16px;background:var(--card);margin:-24px -24px 16px;padding:16px 24px;border-bottom:1px solid var(--line)}.dialog-header h2{margin:0;font-size:19px}.dialog-header button{flex:none}.pagination{display:flex;justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0 20px}.pagination span{margin-right:auto;color:var(--maibot-muted,#68766d)}
 .record-title,.maibot-button.record small{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}.maibot-button.record small{-webkit-line-clamp:2}#pageDetails label.inline-checkbox{display:flex}
 .usage-bars{max-height:320px;overflow:auto;padding:12px 0}.usage-bar{display:grid;grid-template-columns:90px 1fr 100px;align-items:center;gap:14px;margin:8px 0}.usage-bar>div{height:12px;background:color-mix(in srgb,var(--accent) 8%,var(--card));border-radius:4px}.usage-bar span{display:block;height:100%;background:var(--accent);border-radius:4px}.usage-bar>small:last-child{text-align:right}@media(max-width:500px){.usage-bar{grid-template-columns:78px 1fr 85px;gap:7px}}
-#mapWallet .map-columns{display:grid;grid-template-columns:minmax(0,3fr) minmax(230px,2fr);gap:20px}
-#mapWallet svg{width:100%;max-height:330px;background:var(--maibot-background);border-radius:10px}
-#mapWallet svg line{stroke:var(--line);stroke-width:3}#mapWallet svg circle{fill:var(--card);stroke:var(--accent);stroke-width:2}
-#mapWallet svg g{cursor:pointer}#mapWallet svg g:focus circle,#mapWallet svg g:hover circle{stroke-width:5}
-#mapWallet svg text{fill:currentColor;font-size:13px}#mapWallet svg .here{fill:var(--accent)}
-#mapWallet ul{padding-left:18px}#mapWallet output{font-weight:bold;color:var(--accent);font-size:22px}
-@media(max-width:760px){#mapWallet .map-columns{grid-template-columns:1fr}}
+#walletPanel ul{padding-left:18px}#walletPanel output{font-weight:bold;color:var(--accent);font-size:22px}
 </style></head>
 <body class="maibot-page">
 <header><span class="page-mark" aria-hidden="true">✦</span><h1 id="heading">生活页面</h1><p class="maibot-muted" id="intro">选中记录，修改表单，再保存。已有内容会自动填入。</p></header>
-<section id="mapWallet" class="panel" hidden><div class="map-columns">
-<div><h2>生活地图</h2><label>查看地点 <select id="mapPlace"></select></label><p id="mapPosition"></p>
-<svg id="placeGraph" aria-label="当前所选地点及相邻路线" role="group"></svg><div id="placeInfo"></div></div>
-<div><h2>麦麦的钱包</h2><output id="walletBalance"></output><p id="walletStatus"></p>
+<section id="walletPanel" class="panel" hidden><h2>麦麦的钱包</h2><output id="walletBalance"></output><p id="walletStatus"></p>
 <form id="openingForm"><label>起始生活费（虚拟元） <input id="openingCash" type="number" min="0" step="1" required></label>
 <button class="maibot-button">保存起始生活费</button></form><h3>最近收支</h3><ul id="paymentList"></ul>
-<h3>私聊借还</h3><ul id="loanList"></ul></div></div></section>
+<h3>私聊借还</h3><ul id="loanList"></ul></section>
 <details id="retentionPanel" class="panel" hidden><summary>数据保留与清理</summary>
 <p>保留设置：插件配置 → 高级设置 → 数据保留。日记、空间发布记录、阅读笔记和梦境长期保存；Token 统计按保留的调用明细汇总。7分及以上的重要经历、手动保留和仍在使用的记录继续保留。</p>
 <p id="retentionStatus" role="status"></p><div id="retentionCounts"></div>
@@ -226,41 +217,8 @@ function renderPager(host,info,load){
  const label=document.createElement('span');label.textContent=`第 ${info.page} / ${info.pages} 页`;host.append(label);
  for(const [name,delta] of [['上一页',-1],['下一页',1]]){const button=document.createElement('button');button.className='maibot-button';button.textContent=name;button.disabled=info.page+delta<1||info.page+delta>info.pages;button.onclick=()=>run(()=>load(info.page+delta));host.append(button)}
 }
-function drawNeighborhood(data, name){
- const place=data.places.find(p=>p.name===name);
- if(!place)return;
- const graph=$('placeGraph');graph.replaceChildren();
- const routes=data.routes.filter(r=>r.origin===place.id||r.destination===place.id);
- const height=Math.max(110,routes.length*58+20);graph.setAttribute('viewBox','0 0 440 '+height);
- function element(tag,attrs,parent=graph){const node=document.createElementNS('http://www.w3.org/2000/svg',tag);
-  for(const [key,value] of Object.entries(attrs))node.setAttribute(key,value);parent.append(node);return node;}
- function station(x,y,title){
-  const group=element('g',{tabindex:0,role:'button','aria-label':'查看'+title});
-  element('circle',{cx:x,cy:y,r:8,class:title===data.location?'here':''},group);
-  element('text',{x:x+14,y:y+5},group).textContent=title;
-  const select=()=>{$('mapPlace').value=title;drawNeighborhood(data,title)};
-  group.onclick=select;group.onkeydown=e=>{if(['Enter',' '].includes(e.key)){e.preventDefault();select()}};
- }
- routes.forEach((r,i)=>{const y=32+i*58;
-  element('line',{x1:20,y1:height/2,x2:286,y2:y});
-  element('text',{x:165,y:y-8},graph).textContent=r.mode+' '+r.minutes+'分钟'+(r.fare?' · '+r.fare+'元':'');
-  station(286,y,r.origin===place.id?r.destination_name:r.origin_name);
- });
- station(20,height/2,place.name);
- const info=$('placeInfo');info.replaceChildren();
- for(const text of [place.description,...data.shifts.filter(s=>s.location===name).slice(0,3).map(s=>'排班 · '+s.at.slice(5,16).replace('T',' ')+' '+s.title+' · '+s.pay+'元'),
- ...data.visits.filter(s=>s.location===name).slice(-2).reverse().map(s=>'来过 · '+s.at.slice(5,16).replace('T',' ')+' '+s.title)]){
-  if(text){const line=document.createElement('p');line.textContent=text;info.append(line)}
- }
-}
-function drawWalletMap(data){
- $('mapWallet').hidden=false;
- const select=$('mapPlace'),old=select.value;select.replaceChildren();
- for(const p of data.places)select.add(new Option(p.name,p.name));
- select.value=data.places.some(p=>p.name===old)?old:data.location;
- select.onchange=()=>drawNeighborhood(data,select.value);drawNeighborhood(data,select.value);
- $('mapPosition').textContent='麦麦在'+data.location+(data.journey.next?' · 正前往'+data.journey.next:'')
-  +(data.next_stop?.location?' · 下一站 '+data.next_stop.location+' '+data.next_stop.at.slice(11,16):'');
+function drawWallet(data){
+ $('walletPanel').hidden=false;
  $('walletBalance').textContent=data.wallet.balance+' 虚拟元';
  $('openingForm').hidden=Boolean(data.payments.length);
  if(document.activeElement!==$('openingCash'))$('openingCash').value=data.wallet.opening;
@@ -276,7 +234,7 @@ async function renderView(){
   if(binding.parameters?.page)args.page=viewPages[alias]||1;
   viewData[alias]=await maibot.query('view_'+alias,args);
  }
- if(maibot.page.id==='space')drawWalletMap(viewData.data);
+ if(maibot.page.id==='space')drawWallet(viewData.data);
  let host=$('pageDetails');if(!host){host=document.createElement('details');host.id='pageDetails';host.open=!pageMeta.categories.length||maibot.page.id==='continuity';host.className='panel';host.style.marginTop='20px';document.querySelector('main').after(host)}
  drawView(host);
 }

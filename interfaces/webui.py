@@ -515,6 +515,7 @@ class WebUI:
         start = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=day_offset)
         end = start + timedelta(days=1)
         plans = self.store.all("plan", omit=("changes",))
+        data["map"] = self.life_map(sorted(plans, key=lambda p: self.engine.time(p["start"])))
         daily = sorted((p for p in plans if p["status"] != "cancelled" and self.engine.time(p["start"]) < end
                         and self.engine.time(p["end"]) > start), key=lambda p: self.engine.time(p["start"]))
         def brief(plan):
@@ -764,20 +765,23 @@ class WebUI:
 
     @API("ui_space", description="地点、路线及移动进度")
     async def ui_space(self) -> dict:
+        plans = sorted(self.store.all("plan", omit=("changes",)), key=lambda p: self.engine.time(p["start"]))
+        return {**self.life_map(plans), "wallet": self.engine.wallet.account(),
+                "payments": self.store.page("payment", size=20, time_field="at")["items"],
+                "loans": self.store.all("money_request")[-10:]}
+
+    def life_map(self, plans):
         places = self.store.all("place")
         names = {p["id"]: p["name"] for p in places}
         current = self.engine.current(self.now())
         route = current.get("route") if current else None
-        plans = sorted(self.store.all("plan", omit=("changes",)), key=lambda p: self.engine.time(p["start"]))
         upcoming = next((p for p in plans if p["status"] == "scheduled" and not p.get("activity_id")
                          and self.engine.time(p["start"]) >= self.now()), None)
         return {"location": self.engine.state()["location"], "places": [{**p, "outdoor_label": "室外" if p["outdoor"] else "室内"} for p in places],
                 "routes": [{**r, "origin_name": names[r["origin"]], "destination_name": names[r["destination"]]} for r in self.store.all("route")],
                 "journey": self.engine.state().get("journey") or {"location": self.engine.state()["location"], "next": "", "progress": 100, "mode": "停留", "destination": ""},
                 "legs": route["legs"] if route else [], "next_stop": {
-                    "location": upcoming["location"], "at": upcoming["start"]} if upcoming else None, "wallet": self.engine.wallet.account(),
-                "payments": self.store.page("payment", size=20, time_field="at")["items"],
-                "loans": self.store.all("money_request")[-10:],
+                    "location": upcoming["location"], "at": upcoming["start"]} if upcoming else None,
                 "visits": [{"location": p["location"], "title": p["title"], "at": p["end"]} for p in
                            sorted(plans, key=lambda p: self.engine.time(p["end"])) if p["status"] == "completed" and p["kind"] != "travel"][-40:],
                 "shifts": [{"location": p["location"], "title": p["title"], "at": p["start"], "pay": p.get("pay", 0)}
