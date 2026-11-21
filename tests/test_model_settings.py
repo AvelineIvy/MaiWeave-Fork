@@ -1,8 +1,54 @@
 """功能模型选择、配置展示和实际用量记录。"""
 import pytest
+from unittest.mock import AsyncMock
+from pydantic import RootModel
 from test_plugin import plugin
 from maiweave.config import MODEL_FEATURES
+from maiweave.core.models import ChatArrangements
 from maiweave.integrations.usage import generate, _once
+
+
+@pytest.mark.parametrize("wrapped", [
+    "{}", "```json\n{}\n```", "{}\n```", "[说明] 整理如下：\n{}", "```json {} ```", "{}\n整理完毕。", "{}\n[说明] 已整理。",
+])
+async def test_chat_arrangements_wrapped_json(plugin, wrapped):
+    response = wrapped.replace("{}", '{"arrangements":[],"promises":[]}')
+    plugin.ctx.llm.generate.side_effect = None
+    plugin.ctx.llm.generate.return_value = {"success": True, "response": response, "total_tokens": 17}
+    result = await generate(plugin.ctx, plugin.store, plugin.config, "聊天安排", "提取约定", ChatArrangements)
+    assert result == ChatArrangements()
+    assert [(r["status"], r["total_tokens"]) for r in plugin.store.all("model_usage")] == [("成功", 17)]
+
+
+async def test_wrapped_array_preserves_brackets_in_string(plugin):
+    plugin.ctx.llm.generate.side_effect = None
+    plugin.ctx.llm.generate.return_value = {"success": True, "response": '整理如下：["结束符 ] 和 }"]。'}
+    result = await generate(plugin.ctx, plugin.store, plugin.config, "测试", "提取", RootModel[list[str]])
+    assert result.root == ["结束符 ] 和 }"]
+
+
+@pytest.mark.parametrize("note", ["示例 []。实际结果如下：", "[1] 整理结果如下："])
+async def test_fenced_answer_after_example(plugin, note):
+    plugin.ctx.llm.generate.side_effect = None
+    plugin.ctx.llm.generate.return_value = {"success": True, "response": note + '\n```json\n["已约好"]\n```'}
+    result = await generate(plugin.ctx, plugin.store, plugin.config, "测试", "提取", RootModel[list[str]])
+    assert result.root == ["已约好"]
+
+
+@pytest.mark.parametrize("invalid", [None, '{"arrangements":[{}', '{"promises":"缺少字段"}',
+    '{"arrangement":[]}', '{} {}', '{}。实际结果如下：{}', '```json {} ```\n```json {} ```', '[无效, {}]'])
+async def test_invalid_result_records_each_attempt_once(plugin, monkeypatch, invalid):
+    monkeypatch.setattr("maiweave.integrations.usage.asyncio.sleep", AsyncMock())
+    plugin.ctx.llm.generate.side_effect = [
+        {"success": True, "response": invalid, "total_tokens": 20},
+        {"success": True, "response": "{}", "total_tokens": 13},
+    ]
+    await generate(plugin.ctx, plugin.store, plugin.config, "聊天安排", "提取约定", ChatArrangements)
+    failed, success = plugin.store.all("model_usage")
+    assert (failed["status"], failed["total_tokens"]) == ("结果解析失败", 20)
+    assert failed["error"]
+    assert (success["status"], success["total_tokens"]) == ("成功", 13)
+    assert "只输出一个符合要求的 JSON" in plugin.ctx.llm.generate.call_args.args[0]
 
 
 @pytest.mark.parametrize("feature,key", MODEL_FEATURES.items())
@@ -81,6 +127,7 @@ async def test_image_configuration_and_model_schema_are_independent(plugin):
     assert first == second
     assert first["sections"]["image_service"]["fields"]["image_api_key"]["ui_type"] == "password"
     assert "当前使用：replyer" in first["sections"]["model_expression"]["fields"]["diary"]["hint"]
-    await _once(plugin.ctx, plugin.store, plugin.config, "生活日记", "写日记")
+    plugin.ctx.llm.generate.return_value = {"success": True, "response": "今天读完了一章。"}
+    await generate(plugin.ctx, plugin.store, plugin.config, "生活日记", "写日记")
     assert plugin.ctx.llm.generate.call_args.kwargs["task_name"] == "replyer"
     assert plugin.config.diary.image_model == "local-image"

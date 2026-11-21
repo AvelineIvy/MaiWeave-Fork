@@ -130,6 +130,27 @@ async def test_native_chat_both_speakers_and_dedup(plugin, monkeypatch):
     assert plugin.ctx.llm.generate.await_count == 1
 
 
+@pytest.mark.parametrize("invalid", [{"evidence": "这句话是另一人说的"}, {"end": "无效时间"}])
+async def test_invalid_batch_leaves_chat_pending_and_other_chat_runs(plugin, monkeypatch, invalid):
+    now = moment(plugin, monkeypatch)
+    monkeypatch.setattr("maiweave.integrations.usage.asyncio.sleep", AsyncMock())
+    for session in ["chat-a", "chat-b"]:
+        plugin.chat_schedule.mark(session, now - timedelta(seconds=10), "user", "bot")
+    plugin.ctx.db.get.return_value = [
+        {"timestamp": now.isoformat(), "user_id": "bot", "processed_plain_text": "今天下午我调休"},
+        {"timestamp": now.isoformat(), "user_id": "user", "processed_plain_text": "这句话是另一人说的"}]
+    valid = holiday(now).model_dump()
+    def response(items):
+        return {"success": True, "response": json.dumps({"arrangements": items})}
+    plugin.ctx.llm.generate.side_effect = [response([valid, {**valid, **invalid}])] * 3 + [response([valid]), response([valid])]
+    await plugin.chat_schedule.process(now)
+    assert [r["session_id"] for r in plugin.store.all("chat_arrangement")] == ["chat-b"]
+    assert plugin.store.get("runtime", "chat_schedule:chat-a")["pending"]
+    await plugin.chat_schedule.process(now + timedelta(seconds=10))
+    assert sorted(r["session_id"] for r in plugin.store.all("chat_arrangement")) == ["chat-a", "chat-b"]
+    assert plugin.ctx.llm.generate.await_count == 5
+
+
 @pytest.mark.parametrize("budget", [1200, 2400, 4800])
 async def test_arrangements_fit_chat_budget(plugin, monkeypatch, budget):
     now = moment(plugin, monkeypatch)

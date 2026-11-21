@@ -10,6 +10,14 @@ from test_plugin import plugin
 
 TEXT = '# 第一章 风\n风吹过窗前的银杏树。\n# 第二章 灯\n夜里一盏灯照着书页。'
 
+
+async def test_unknown_book_action_does_not_schedule_reading(plugin):
+    book = await upload(plugin)
+    before = plugin.store.all("plan")
+    with pytest.raises(ValueError, match="未知书架操作"):
+        await plugin.books_tool("status", book_id=book["id"], stream_id="chat")
+    assert plugin.store.all("plan") == before
+
 async def upload(plugin, text=TEXT, filename='银杏书.md'):
     row = await plugin.ui_book_upload('begin', filename=filename, author='测试作者')
     raw = text.encode('utf-8')

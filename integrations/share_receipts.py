@@ -64,7 +64,7 @@ class ShareReceipts:
     async def decide(self, session, intents, now, config, recipient=None):
         recipient = recipient or {"场景": "私聊"}
         guide = (
-            "判断这次生活经历是否值得现在主动告诉对方，从候选里选一件或等待，输出JSON：send（布尔值）、candidate（候选序号，从1开始）、reason（中文原因）。"
+            "判断这次生活经历是否值得现在主动告诉对方，输出JSON。发送时send=true，candidate填候选序号（从1开始）；等待时send=false，省略candidate。reason用一句中文说明，最多300字。"
             "结合人物画像中的明确兴趣、关系和当前聊天判断话题是否适合这个对象。亲近的人可以分享日常小事；"
             "普通、熟悉关系更看重共同兴趣、关心的进展或新发现；亲近、亲密关系也可以因为日常感受、小进展而想联系。兴趣未知时参考当前对话。"
             "明确期待的后续优先于笼统兴趣；偶尔提起的话题按当次交流理解。画像中的近期互动、推测和稳定兴趣分别理解。"
@@ -182,17 +182,21 @@ class ShareReceipts:
                 if (any(part.get("success") for part in segments) or meta.get("sent_message_ids")
                         or (name == "send_emoji" and data["success"])):
                     ids = meta.get("sent_message_ids") or [part["message_id"] for part in segments if part.get("success") and part.get("message_id")]
+                    # 引用回复的消息记录包含对方原话，投递回执中的分段才是角色正文。
+                    text_by_id = {part["message_id"]: part["segment"] for part in segments
+                                  if part.get("success") and part.get("message_id") and part.get("segment")}
                     sent_at = result["timestamp"]
                     delivered = []
                     for message_id in ids:
                         message = await self.ctx.db.get("Messages", filters={"session_id": row["session"], "message_id": message_id}, single_result=True)
-                        if message:
-                            delivered.append(message.get("processed_plain_text", ""))
-                            if message.get("timestamp"):
-                                sent_at = message["timestamp"]
+                        text = text_by_id.get(message_id) or (message or {}).get("processed_plain_text")
+                        if text:
+                            delivered.append(text)
+                        if message and message.get("timestamp"):
+                            sent_at = message["timestamp"]
                     if delivered:
                         row["sent_text"] = "\n".join(delivered)[:600]
-                    row.update(outcome="实际已发送", delivery=f"{datetime.fromisoformat(sent_at).astimezone(now.tzinfo):%H:%M:%S} 已确认投递", sent_at=sent_at)
+                    row.update(outcome="实际已发送", delivery=f"{self.time(sent_at, now.tzinfo):%H:%M:%S} 已确认投递", sent_at=sent_at)
                     break
                 if not data["success"]:
                     failure = data.get("error_message") or "MaiBot 返回发送失败"
@@ -219,7 +223,7 @@ class ShareReceipts:
     def context(self, session, now):
         rows = sorted((r for r in self.store.all("share_receipt") if r["session"] == session and r.get("mode") != "群聊接话" and r.get("sent_at")
                        and timedelta() <= now - self.time(r["sent_at"], now.tzinfo) < timedelta(days=2)),
-                      key=lambda r: r["sent_at"], reverse=True)[:3]
+                      key=lambda r: self.time(r["sent_at"], now.tzinfo), reverse=True)[:3]
         return [{"id": r["id"], "topic": r.get("topic", r.get("share_activity", "生活分享")), "sent_at": r["sent_at"],
                  "sent_text": r.get("sent_text", ""), "status": r.get("followup", "waiting"), "response": r.get("response", ""),
                  "observation": r.get("observation", ""), "experience_id": r.get("experience_id", "")}
@@ -253,9 +257,9 @@ class ShareReceipts:
             self.store.put("share_receipt", row)
         return {"topic": row.get("topic", "生活分享"), "status": status, "response": row["response"]}
 
-    def history(self, skips):
+    def history(self, skips, zone):
         rows = [{"mode": "自然交流", **row} for row in [*skips, *self.store.all("share_receipt")]]
-        return sorted(rows, key=lambda row: row["created"], reverse=True)[:10]
+        return sorted(rows, key=lambda row: self.time(row["created"], zone), reverse=True)[:10]
 
     def sent_times(self, session, zone):
         times = []

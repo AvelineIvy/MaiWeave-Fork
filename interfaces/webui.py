@@ -433,7 +433,7 @@ class WebUI:
         await self.living.receipts.refresh(self.now())
         self.living.settle_shares()
         share_summary = self.living.share_summary(self.now())
-        share_decisions = self.living.receipts.history(self.living.share_decisions)
+        share_decisions = self.living.receipts.history(self.living.share_decisions, self.now().tzinfo)
         if share_summary or share_decisions:
             streams = {row["stream_id"]: row for row in await self.ctx.chat.get_all_streams(platform="all_platforms")}
             profiles = {row["session_id"]: row.get("name", "") for row in self.store.all("profile")}

@@ -1,10 +1,160 @@
 """聊天配图的来源、复用、开关与主动发送结算。"""
+import asyncio
 import json
+from datetime import timedelta
 from unittest.mock import AsyncMock
 import pytest
 from test_plugin import plugin
 from test_diary_images import service
 from maiweave.core.models import ExperienceInput
+from maiweave.integrations.life_images import current_image_candidates, image_request_stage, image_tool_relevant
+
+
+def test_photo_request_and_tool_search_apply_to_current_turn():
+    def msg(text):
+        return {"item_type": "UserMessageItem", "parts": [{"type": "text", "text": "<message >" + text}]}
+    search = {"item_type": "FunctionCallItem", "tool_call": {"func_name": "tool_search",
+              "args": {"query": "maiweave_show_life"}}}
+    assert image_tool_relevant([msg("我想看看你")])
+    assert image_tool_relevant([msg("折成什么样了？")])
+    assert image_tool_relevant([msg("拿来瞅瞅"), search])
+    assert not image_tool_relevant([search, msg("能仔细讲讲吗")])
+    assert not image_tool_relevant([msg("我想看看你"), msg("这样呀")])
+
+
+def test_previous_candidate_lookup_is_removed_as_a_pair():
+    def call(key, action):
+        return {"item_type": "FunctionCallItem", "tool_call": {"func_name": "maiweave_show_life",
+                "call_id": key, "args": {"action": action}}}
+    def output(key):
+        return {"item_type": "FunctionCallOutputItem", "call_id": key, "output": "{}"}
+    message = {"item_type": "UserMessageItem", "parts": [{"type": "text", "text": "<message >这样呀"}]}
+    keep = [call("photo", "send"), output("photo"), message, call("now", "list"), output("now")]
+    assert current_image_candidates([call("old", "list"), output("old"), *keep]) == keep
+
+
+def test_planner_stops_offering_images_after_accepted_send():
+    def message(body):
+        return {"item_type": "UserMessageItem", "parts": [{"type": "text", "text": body}]}
+    call = {"item_type": "FunctionCallItem", "tool_call": {"call_id": "one", "func_name": "maiweave_show_life", "args": {"action": "send"}}}
+    result = {"item_type": "FunctionCallOutputItem", "call_id": "one", "output": '{"status":"进行中"}'}
+    items = [message('<message msg_id="1">看看书签'), call]
+    assert not image_request_stage(items)
+    assert not image_request_stage([*items, {**result, "output": "发送失败"}])
+    items += [result, message('<message msg_id="2" is_self_message="true">[图片]'), message("请分析后决定下一步")]
+    assert image_request_stage(items) == "sent"
+    assert image_request_stage([*items, message('<message msg_id="image-1" user="麦麦">[图片]')],
+                                 lambda mid: mid == "image-1") == "sent"
+    assert not image_request_stage([*items, message('<message msg_id="3">再发一次')])
+    assert not image_request_stage([*items, message('<plugin_proactive_task id="next">')])
+
+
+async def test_planner_batch_sends_each_cached_image_once(plugin, monkeypatch):
+    p = plugin
+    now, event = setup(p, monkeypatch)
+    await p.life_images.send(event["id"], "chat-a", now)
+    p.ctx.send.image.reset_mock()
+    def call(cid, action, eid=""):
+        return {"item_type": "FunctionCallItem", "tool_call": {"call_id": cid, "func_name": "maiweave_show_life",
+                "args": {"action": action, "experience_id": eid}}}
+    items = [call("a", "list"), call("b", "list"), call("c", "send", event["id"]),
+             call("d", "send", event["id"]), call("e", "send", "other")]
+    result = await p.planner_receipt("chat-a", items, item_schema_version=1)
+    kept = result["modified_kwargs"]["output_items"]
+    assert kept == [items[0], items[2], items[4]]
+    assert result["modified_kwargs"]["item_schema_version"] == 1
+    for item in kept[:2]:
+        await p.show_life(**item["tool_call"]["args"], stream_id="chat-a")
+    p.ctx.send.image.assert_awaited_once()
+    assert await p.planner_receipt("chat-a", [items[2]]) == {"action": "continue"}
+
+
+async def test_planner_repeating_list_across_rounds(plugin, monkeypatch):
+    _, event = setup(plugin, monkeypatch)
+    tool = {"function": {"name": "maiweave_show_life", "parameters": {
+        "properties": {"action": {"enum": ["list", "send"]}}, "required": ["action"]}}}
+    message = {"item_type": "UserMessageItem", "parts": [{"type": "text", "text": "<message >我想看看你"}]}
+    first = {"item_type": "FunctionCallItem", "tool_call": {"func_name": "maiweave_show_life",
+             "args": {"action": "list"}, "call_id": "first"}}
+    second = {**first, "tool_call": {**first["tool_call"], "call_id": "second"}}
+    async def prepare(items):
+        await plugin.planner_context(session_id="chat-a", items=list(items), tool_definitions=[tool])
+    await prepare([message])
+    assert await plugin.planner_receipt("chat-a", [first]) == {"action": "continue"}
+    result = await plugin.show_life("list", stream_id="chat-a")
+    history = [message, first, {"item_type": "FunctionCallOutputItem", "call_id": "first",
+                               "output": json.dumps(result)}]
+    await prepare(history)
+    response = await plugin.planner_receipt("chat-a", [second])
+    assert response["modified_kwargs"]["output_items"][0]["tool_call"] == {
+        "func_name": "wait", "call_id": "second", "args": {}}
+    for name, args in [("reply", {}), ("maiweave_show_life", {"action": "send", "experience_id": event["id"]})]:
+        await prepare(history)
+        valid = {"item_type": "FunctionCallItem", "tool_call": {"func_name": name, "args": args, "call_id": "ok"}}
+        response = await plugin.planner_receipt("chat-a", [second, valid])
+        assert response["modified_kwargs"]["output_items"] == [valid]
+    await prepare([*history, message])
+    assert await plugin.planner_receipt("chat-a", [second]) == {"action": "continue"}
+
+
+@pytest.mark.parametrize("mode", ["自然交流", "主动表达"])
+@pytest.mark.parametrize("first", ["追问", "主动", "已送达"])
+async def test_same_picture_reaches_chat_once(plugin, monkeypatch, mode, first):
+    p = plugin
+    now, event = setup(p, monkeypatch)
+    row = {"id": "share", "session": "chat-a", "created": now.isoformat(), "sent_at": now.isoformat(),
+           "outcome": "实际已发送", "mode": mode, "experience_id": event["id"], "image_requested": True}
+    with p.store.db:
+        p.store.put("share_receipt", row)
+    started, resume = asyncio.Event(), asyncio.Event()
+    async def deliver(*args, **kwargs):
+        started.set()
+        await resume.wait()
+        return {"sent": True, "message_id": "image-1"}
+    p.ctx.send.image.side_effect = deliver
+    if first == "主动":
+        share = asyncio.create_task(p.living.share_images(now))
+        await asyncio.wait_for(started.wait(), 5)
+        chat = asyncio.create_task(p.show_life("send", event["id"], stream_id="chat-a"))
+        await asyncio.sleep(0)
+        resume.set()
+        await asyncio.gather(share, chat)
+    else:
+        job = await p.show_life("send", event["id"], stream_id="chat-a")
+        assert "after_reply=stop" in job["instruction"]
+        again = await p.show_life("send", event["id"], stream_id="chat-a")
+        assert again["status"] == "正在生成，请稍等"
+        await asyncio.wait_for(started.wait(), 5)
+        if first == "已送达":
+            resume.set()
+            await asyncio.gather(*list(p.jobs))
+        share = asyncio.create_task(p.living.share_images(now))
+        await asyncio.sleep(0)
+        resume.set()
+        await asyncio.gather(share, *list(p.jobs))
+    assert len(p.store.all("image_delivery")) == p.ctx.send.image.await_count == 1
+    assert p.store.get("share_receipt", "share")["image_message_id"] == "image-1"
+    assert len(p.living.receipts.sent_times("chat-a", now.tzinfo)) == 1
+    resent = await p.show_life("send", event["id"], stream_id="chat-a")
+    assert "after_reply=stop" in resent["instruction"] and p.ctx.send.image.await_count == 2
+
+
+async def test_auto_image_uses_only_matching_deliveries(plugin, monkeypatch):
+    p = plugin
+    now, event = setup(p, monkeypatch, session="")
+    await p.life_images.send(event["id"], "chat-b", now)
+    await p.life_images.send(event["id"], "chat-a", now)
+    later = p.now() + timedelta(minutes=1)
+    with p.store.db:
+        for key, session, status in [("other", "chat-b", "已发送"), ("failed", "chat-a", "发送失败")]:
+            p.store.put("image_delivery", {"id": key, "experience_id": event["id"], "session_id": session,
+                                           "status": status, "at": later.isoformat(), "share_id": ""})
+    row = {"id": "share", "session": "chat-a", "created": later.isoformat(), "sent_at": later.isoformat(),
+           "outcome": "实际已发送", "experience_id": event["id"], "image_requested": True}
+    with p.store.db:
+        p.store.put("share_receipt", row)
+    await p.living.share_images(later)
+    assert p.ctx.send.image.await_count == 3
 
 
 def setup(p, monkeypatch, session="chat-a"):
@@ -163,3 +313,19 @@ async def test_service_off_lists_existing_images_before_recent_limit(plugin, mon
     with p.store.db:
         p.store.put("experience", event)
     assert p.life_images.candidates("chat-a") == []
+
+
+async def test_successful_list_offers_only_send_until_next_message(plugin, monkeypatch):
+    setup(plugin, monkeypatch)
+    tool = {"function": {"name": "maiweave_show_life", "parameters": {
+        "properties": {"action": {"enum": ["list", "send"]}}, "required": ["action"]}}}
+    call = {"item_type": "FunctionCallItem", "tool_call": {"func_name": "maiweave_show_life",
+            "call_id": "pick", "args": {"action": "list"}}}
+    result = {"item_type": "FunctionCallOutputItem", "call_id": "pick", "output": '{"items":[{"id":"photo"}]}'}
+    definitions = plugin.life_images.tool_definitions
+    params = definitions([tool], "chat-a", [call, result])[0]["function"]["parameters"]
+    assert params["properties"]["action"]["enum"] == ["send"]
+    assert params["required"] == ["action", "experience_id"]
+    assert definitions([tool], "chat-a", [call, {**result, "output": '{"items":[]}'}]) == []
+    new = {"item_type": "UserMessageItem", "parts": [{"type": "text", "text": '<message msg_id="new">我想看看你'}]}
+    assert definitions([tool], "chat-a", [call, result, new]) == [tool]

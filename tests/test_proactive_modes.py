@@ -59,6 +59,7 @@ async def test_expression_sent_once_with_shared_budget(plugin, monkeypatch):
     await plugin.living.share(now)
     plugin.ctx.maisaka.proactive.trigger.assert_not_awaited()
     call = plugin.ctx.maisaka.reply.generate.await_args
+    assert "用一两句话说完" in call.args[1]
     assert "读到哪里了" in call.args[1]
     assert "可以选择沉默" not in call.args[1]
     plugin.ctx.db.get.assert_awaited_with("Messages", filters={"session_id": "chat-a", "is_command": False}, order_by="-timestamp", limit=10)
@@ -78,7 +79,7 @@ async def test_expression_sent_once_with_shared_budget(plugin, monkeypatch):
     await plugin.living.share(now + timedelta(minutes=62))
     plugin.ctx.maisaka.proactive.trigger.assert_awaited_once()
     assert "可以选择沉默" in plugin.ctx.maisaka.proactive.trigger.await_args.args[1]
-    assert {r["mode"] for r in plugin.living.receipts.history([])} == {"自然交流", "主动表达"}
+    assert {r["mode"] for r in plugin.living.receipts.history([], now.tzinfo)} == {"自然交流", "主动表达"}
     assert (await plugin.ui_overview())["share_status"] == "已启用 · 自然交流"
 
 
@@ -163,6 +164,7 @@ async def test_mode_switch_waits_for_accepted_natural_request(plugin, monkeypatc
     now = prepare(plugin, monkeypatch)
     plugin.config.proactive.mode = "自然交流"
     await plugin.living.share(now)
+    assert "用一两句话说完" in plugin.ctx.maisaka.proactive.trigger.await_args.args[1]
     plugin.config.proactive.mode = "主动表达"
     await plugin.living.share(now + timedelta(minutes=1))
     plugin.ctx.maisaka.reply.generate.assert_not_awaited()
@@ -176,14 +178,14 @@ def test_mode_config_upgrade_keeps_saved_values(old_version):
     from maibot_sdk.config import rebuild_plugin_config_data
     instance = create_plugin()
     defaults = instance.get_default_config()
-    assert defaults["plugin"]["config_version"] == "0.12.1"
+    assert defaults["plugin"]["config_version"] == "0.12.6"
     previous = deepcopy(defaults)
     previous["plugin"]["config_version"] = old_version
     previous["proactive"].pop("mode")
     previous["proactive"].update(enabled=True, daily_limit=7, cooldown_minutes=45, session_ids=["chat-a"], share_threshold=6)
     previous["life"].update(timezone="Asia/Tokyo", interests=["画画"], autonomous=False)
     expected = deepcopy(previous)
-    expected["plugin"]["config_version"] = "0.12.1"
+    expected["plugin"]["config_version"] = "0.12.6"
     expected["proactive"]["mode"] = "自然交流"
     upgraded = rebuild_plugin_config_data(defaults, previous)
     instance.set_plugin_config(upgraded)

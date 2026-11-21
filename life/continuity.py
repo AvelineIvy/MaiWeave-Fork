@@ -8,6 +8,7 @@ from datetime import timedelta
 from ..core.engine import uid
 from ..core.models import ActivityAssessment, ActivityOutcome, GoalOutline, SCORE_GUIDE
 from ..integrations.usage import generate
+from ..integrations.chat_context import brief, select_fields
 
 
 class Continuity:
@@ -85,17 +86,27 @@ class Continuity:
         record = {"id": plan_id, "session_id": plan["session_id"], "title": plan["title"], "status": "生成中", "error": "", "at": now.isoformat()}
         with store.db:
             store.put("reflection", record)
-        meanings = [r["activity"] for r in store.all("activity_memory") if self.engine.visible(r, plan["session_id"])]
-        history = self.engine.experiences(plan["session_id"], limit=20)
+        memories = [r for r in store.all("activity_memory") if self.engine.visible(r, plan["session_id"])]
+        meanings = list(dict.fromkeys(r["activity"] for r in memories))
+        history = [select_fields(r, ("summary", "source", "occurred_at")) for r in self.engine.experiences(plan["session_id"], limit=8)
+                   if r["id"] not in {event["id"], (prior_event or {}).get("id")}][:4]
         goal = store.get("goal", plan["goal_id"]) if plan["goal_id"] else None
+        goal_context = select_fields(goal or {}, ("title", "target_sessions", "completed_sessions"))
+        if goal and plan.get("goal_step_id"):
+            goal_context["step"] = next((s for s in goal.get("steps", []) if s["id"] == plan["goal_step_id"]), None)
+        plan_context = select_fields(plan, ("title", "kind", "start", "end", "location", "motivation", "participants"))
+        event_fields = ("summary", "source", "details", "occurred_at")
+        related = [select_fields(r, ("activity", "subject", "next_action")) for r in sorted(memories, key=lambda r: r.get("updated_at", ""))
+                   if r.get("kind") == plan["kind"] and r["id"] != plan.get("continuation_id")][-4:]
         prompt = (
             "整理角色这次活动的结果，输出 JSON 对象。activity 是稳定的活动类别，如阅读、烹饪、绘画；"
             "subject 填具体作品或对象名称，缺少名称时填空字符串。同义活动沿用已有类别，每部作品保留各自的名称。"
-            f"已有类别：{json.dumps(meanings, ensure_ascii=False)}；活动：{json.dumps(plan, ensure_ascii=False)}；"
-            f"现有经历：{json.dumps(event, ensure_ascii=False)}；目标：{json.dumps(goal, ensure_ascii=False)}；"
-            f"最近经历：{json.dumps(history, ensure_ascii=False)}；"
-            f"这次接着做的事：{json.dumps(continuation, ensure_ascii=False)}；前次经历：{json.dumps(prior_event, ensure_ascii=False)}；"
-            f"已保存的接续内容：{json.dumps(self.context(plan['session_id'], now)['continuations'], ensure_ascii=False)}。"
+            f"已有类别：{json.dumps(meanings, ensure_ascii=False)}；活动：{json.dumps(plan_context, ensure_ascii=False)}；"
+            f"现有经历：{json.dumps(select_fields(event, event_fields), ensure_ascii=False)}；目标：{json.dumps(goal_context, ensure_ascii=False)}；"
+            f"最近经历：{json.dumps(brief(history, 160, 4), ensure_ascii=False)}；"
+            f"这次接着做的事：{json.dumps(select_fields(continuation or {}, ('activity','subject','next_action','completed')), ensure_ascii=False)}；"
+            f"前次经历：{json.dumps(brief(select_fields(prior_event or {}, event_fields), 200, 6), ensure_ascii=False)}；"
+            f"相关进度：{json.dumps(related, ensure_ascii=False)}。"
         )
         if research:
             prompt += (f"本次真实获取的外部资料：{json.dumps(research['sources'], ensure_ascii=False)}。"
@@ -115,6 +126,7 @@ class Continuity:
                 "平淡的活动可以只记一两件小事，比如桌面收拾好了、坐着听完两首歌。"
                 "next_action只在这次经历留下具体想法或实际未完事项时填写，顺利收尾时填空字符串。"
                 "接续已有事项时写清这次做成了什么；原来惦记的事办完就收尾，新的想法依据这次经历。"
+                "如果前次completed为true且本次也已办完，next_action留空。只有这次结果带来了另一件具体事情时才填new_followup，例如买到种子后准备播种。重复确认已经办完的事情就此收尾。"
                 "activity描述本次实际做的活动；仍在做同一作品时沿用subject，换成买东西等后续活动时填写这次的具体对象。"
                 "返回activity、subject、summary、details（中文键和值的对象，包含过程、结果、进度）、"
                 "enjoyment（-5到5）、mood和stress（-5到5）、next_action（留下一件具体想尝试的事或尚未想明白的问题，顺其自然时可留空）、"
@@ -126,6 +138,11 @@ class Continuity:
                        "关联阶段目标时，依据现有结果返回goal_units（有实质进展为1，没有或未知为0）和next_action（依据现有记录提出下一步）。")
         try:
             result = await self.ask(prompt, ActivityOutcome if enrich else ActivityAssessment, "活动结果" if enrich else "习惯归类")
+            if enrich and continuation and result.completed:
+                following = result.new_followup if continuation.get("completed") else result.next_action
+                if following.strip() == continuation["next_action"].strip():
+                    following = ""
+                result = result.model_copy(update={"next_action": following.strip()})
             if continuation and not continuation.get("completed", False) and plan["kind"] == continuation.get("kind"):
                 result = result.model_copy(update={"subject": continuation["subject"]})
             plan = store.get("plan", plan_id)
@@ -236,6 +253,8 @@ class Continuity:
     def save_thread(self, title, context, session, due_at, now, thread_id="", source_ref="", expires_at=""):
         if not title.strip() or not context.strip():
             raise ValueError("跟进事项需要标题和具体上下文")
+        if not due_at:
+            raise ValueError("请按约定填写跟进时间 due_at，包含日期、时刻和时区。时间待定时先和对方商量。")
         due = self.engine.time(due_at)
         expires = self.engine.time(expires_at) if expires_at else due + timedelta(days=1)
         if expires <= due or expires <= now:
@@ -245,6 +264,7 @@ class Continuity:
                   "due_at": due.isoformat(), "created_at": old["created_at"] if old else now.isoformat(),
                   "status": "open", "source_ref": source_ref or (old or {}).get("source_ref", ""), "requested_at": "",
                   "expires_at": expires.isoformat(), "updated_at": now.isoformat()}
+        record.pop("resolved_at", None)
         with self.engine.store.db:
             self.engine.store.put("thread", record)
         return record

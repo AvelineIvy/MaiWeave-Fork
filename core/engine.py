@@ -144,6 +144,8 @@ class LifeEngine:
                 "start": start.isoformat(), "end": end.isoformat(), "status": "scheduled",
                 "autonomous": autonomous, "flexible": value.flexible or autonomous,
                 "elapsed_seconds": 0, "created_at": now.isoformat(), "changes": []}
+        if value.continuation_id:
+            plan["continuation_experience_id"] = self.store.get("activity_memory", value.continuation_id).get("experience_id", "")
         with self.store.db:
             self.store.put("plan", plan)
         return plan
@@ -210,6 +212,8 @@ class LifeEngine:
         plan = self.owned("plan", value.plan_id, session) if value.plan_id else None
         if plan and plan["status"] == "completed":
             raise ValueError("该计划已经记录完成，请补充原经历")
+        if plan and plan["status"] == "cancelled":
+            raise ValueError("这项计划已取消。实际发生的事情可以作为独立经历保存。")
         if plan and occurred < self.time(plan["start"]):
             raise ValueError("经历时间早于关联计划，请核对计划 ID 和发生时间")
         if plan and plan["participants"] and value.source == "simulated":
@@ -248,9 +252,9 @@ class LifeEngine:
         with self.store.db:
             self.store.put("experience", record)
             for memory in self.store.all("activity_memory"):
-                if memory["experience_id"] == record_id:
+                if memory.get("experience_id") == record_id:
                     memory.update(details=dict(record["details"]), updated_at=now.isoformat())
-                    if "进度" in details:
+                    if "进度" in details and not memory.get("completed"):
                         memory["next_action"] = "从更新后的进度继续：" + details["进度"]
                     self.store.put("activity_memory", memory)
         return record

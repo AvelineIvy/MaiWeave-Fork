@@ -84,4 +84,6 @@ class Greetings:
         if self.living.config.proactive.mode == "主动表达":
             intent = (f"{window['reason']}，向对方自然说{window['kind']}，用一两句话接上最近话题。"
                       f"最近聊天：{json.dumps(context, ensure_ascii=False)}。")
+        if window["kind"] == "晚安":
+            intent = "自己困了可以说先去睡，对方也困了就互道晚安。对方还在忙时顺着话题道别，熟人之间偶尔关心一句就好。" + intent
         return {"key": key, "kind": window["kind"], "until": window["until"].isoformat(), "intent": intent}

@@ -18,10 +18,10 @@ from .config import MaiWeaveConfig
 from .core.engine import LifeEngine, read_life_status
 from .life.living import Living
 from .integrations.memory import NativeMemory
-from .integrations.life_images import LifeImages
+from .integrations.life_images import LifeImages, current_image_candidates, distinct_image_calls
 from .core.models import ExperienceInput, GoalInput, PlanInput, PlanPatch, RelationshipChange
 from .core.store import Store
-from .integrations.chat_context import ChatContext
+from .integrations.chat_context import ChatContext, discovered_tools
 from .integrations.chat_schedule import ChatSchedule
 from .core.retention import Retention
 from .integrations.share_receipts import planner_task, output_summary
@@ -115,7 +115,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         groups = [
             ("life", "life", "生活开关", "控制生活推进与自主活动。", ["enabled", "autonomous"]),
             ("profile", "life", "角色设定", "时区已有默认值，背景和兴趣按需补充。", ["timezone", "interests", "background"]),
-            ("sleep", "life", "日常作息", "关闭作息可全天候交流；开启后按 24 小时制安排睡眠。", ["schedule_enabled", "nap_quiet", "sleep_hour", "wake_hour"]),
+            ("sleep", "life", "日常作息", "关闭作息可全天候交流；开启后按 24 小时制安排睡眠。", ["schedule_enabled", "nap_quiet", "sleep_skip_private_planner", "sleep_hour", "wake_hour"]),
             ("wake", "life", "睡眠唤醒", "设置私聊唤醒概率、唤醒词语和醒来后留给聊天的时间。", ["wake_enabled", "private_wake_probability", "wake_minutes", "wake_keywords"]),
             ("planning", "life", "更新与规划", "设置生活推进和自主规划的检查间隔。", ["tick_seconds", "planning_interval_minutes"]),
             ("weather", "world", "实时天气", "填写城市，查看当地天气和预报。", ["weather_enabled", "weather_provider", "weather_api_key", "city", "country_code"]),
@@ -214,6 +214,8 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         self.books = Books(self.engine, self.ctx, self.config, self.ctx.paths.data_dir)
         self.chat_books = {}
         self.chat_context = ChatContext(self)
+        self.searchable_tools = {c["name"] for c in self.get_components() if c["type"] == "TOOL"
+                                 and c["name"] not in {"maiweave_share_followup", "maiweave_show_life"}}
         self.chat_schedule = ChatSchedule(self)
         self.diary = Diary(self.engine, self.ctx, self.config)
         self.diary_publisher = DiaryPublisher(self.engine, self.ctx, self.config)
@@ -384,12 +386,24 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
 
     @HookHandler("maisaka.planner.before_request")
     async def planner_context(self, **kwargs):
+        session = kwargs["session_id"]
+        followup_tool = next((t for t in kwargs.get("tool_definitions", [])
+                              if t.get("function", {}).get("name") == "maiweave_share_followup"), None)
+        if followup_tool:
+            kwargs["tool_definitions"] = [t for t in kwargs["tool_definitions"] if t is not followup_tool]
         if "tool_definitions" in kwargs:
-            kwargs["tool_definitions"] = self.life_images.tool_definitions(kwargs["tool_definitions"], kwargs["session_id"])
+            self.life_images.planner_actions[session] = ()
+            kwargs["tool_definitions"] = self.life_images.tool_definitions(kwargs["tool_definitions"], kwargs["session_id"], kwargs["items"])
         if not self.config.life.enabled:
             return {"action": "continue", "modified_kwargs": kwargs}
-        session = kwargs["session_id"]
+        if "tool_definitions" in kwargs:
+            kwargs["tool_definitions"] = discovered_tools(kwargs["items"], kwargs["tool_definitions"], self.searchable_tools)
         task = planner_task(kwargs["items"])
+        kwargs["items"] = current_image_candidates(kwargs["items"])
+        if task and "tool_definitions" in kwargs:
+            # 主动分享由发送回执按选定话题配图。
+            kwargs["tool_definitions"] = [t for t in kwargs["tool_definitions"]
+                                          if t.get("function", {}).get("name") != "maiweave_show_life"]
         self.living.receipts.turn[session] = task
         receipt = self.store.find("share_receipt", task) if task else None
         thread = self.store.find("thread", receipt["thread_id"]) if receipt and receipt.get("thread_id") else None
@@ -414,21 +428,39 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         else:
             self.chat_books.pop(session, None)
         # 动态状态随本轮对话附在末尾，MaiBot 的各模型适配器均保留该位置。
+        followup_ids = []
+        context = self.chat_context.build(session, book_id, text, followup_ids=followup_ids)
+        if followup_tool and followup_ids and not task:
+            function = followup_tool["function"]
+            params = function["parameters"]
+            fields = params["properties"]
+            kwargs["tool_definitions"].append({**followup_tool, "function": {**function, "parameters": {
+                **params, "properties": {**fields, "receipt_id": {**fields["receipt_id"], "enum": followup_ids}}}}})
         kwargs["items"].append({
             "item_type": "UserMessageItem",
             "meta": {"item_id": "maiweave-life-context", "logical_turn_id": None, "timestamp": self.now().isoformat(timespec="minutes")},
-            "parts": [{"type": "text", "text": self.context_text(session, book_id, text)}],
+            "parts": [{"type": "text", "text": context}],
         })
+        for tool in kwargs.get("tool_definitions", []):
+            function = tool.get("function", {})
+            if function.get("name") == "maiweave_show_life":
+                action = function.get("parameters", {}).get("properties", {}).get("action", {})
+                self.life_images.planner_actions[session] = action.get("enum", ("list", "send"))
+                break
         return {"action": "continue", "modified_kwargs": kwargs}
 
     @HookHandler("maisaka.planner.after_response")
     async def planner_receipt(self, session_id: str, output_items: list, **kwargs):
+        original_items = output_items
+        output_items = distinct_image_calls(output_items, self.life_images.planner_actions.pop(session_id, None))
         self.living.receipts.observe(session_id, output_items)
         self.presence.observe_planner(session_id, output_items, self.now())
         self.living.observe_farewell(session_id, output_items, self.now())
         if not any(item.get("item_type") == "FunctionCallItem" for item in output_items):
             self.ctx.logger.info("MaiWeave Planner 响应 [%s]：%s；睡眠静默=%s",
                                  session_id, output_summary(output_items), self.living.quiet_sleep(self.now()))
+        if output_items != original_items:
+            return {"action": "continue", "modified_kwargs": {**kwargs, "session_id": session_id, "output_items": output_items}}
         return {"action": "continue"}
 
     @HookHandler("maisaka.replyer.before_request")
@@ -450,7 +482,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         record = self.presence.declare(session, user, status, self.now(), until)
         return {"status": record["status"], "expires_at": record["expires_at"]}
 
-    @Tool("maiweave_share_followup", description="用户接上此前主动分享时，关联分享与当前回应；聊完时标记 closed。", parameters=schema({
+    @Tool("maiweave_share_followup", visibility="visible", description="对方追问或评论 shared_topics 中的具体事情时，选对应的分享 ID 登记一次，再接着聊天。普通应声直接回复或等待。", parameters=schema({
         "receipt_id": text_field("shared_topics 中的分享 ID"), "summary": text_field("当前回应的要点"),
         "status": {"type": "string", "enum": ["answered", "closed"]}}, ["receipt_id", "summary", "status"]))
     @operation
@@ -631,7 +663,6 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         self.chat_context.kinds[message["session_id"]] = "group" if message.get("message_info", {}).get("group_info") else "private"
         self.chat_context.speakers[message["session_id"]] = message.get("message_info", {}).get("user_info", {}).get("user_id", "")
         if not re.fullmatch(r"/(?:maiweave|织生活)(?:\s+状态)?", (message.get("processed_plain_text") or "").strip()):
-            self.chat_context.messages[message["session_id"]] = message.get("processed_plain_text") or ""
             await self.identify_person(message["session_id"], message.get("message_info", {}).get("user_info", {}).get("user_id", ""), message.get("platform", ""))
             if self.config.life.enabled:
                 if not (message.get("processed_plain_text") or "").strip().startswith("/"):
@@ -646,9 +677,17 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
             handled_wake = self.living.wake_for_message(message.get("processed_plain_text") or "", message["session_id"], self.now(),
                                          message.get("message_info", {}).get("user_info", {}).get("user_id", ""))
             text = (message.get("processed_plain_text") or "").strip()
-            if (not handled_wake and self.chat_context.kinds[message["session_id"]] == "private" and text and not text.startswith("/")
-                    and self.config.life.private_wake_probability and self.living.quiet_sleep(self.now())):
-                self.chat_context.wake_candidates[message["session_id"]] = self.chat_context.speakers[message["session_id"]]
+            session = message["session_id"]
+            if self.chat_context.kinds[session] == "private" and not text.startswith("/"):
+                now = self.now()
+                if self.config.life.sleep_skip_private_planner and self.living.quiet_sleep(now, session):
+                    if text and not handled_wake:
+                        self.living.wake_for_private_turn(session, now, self.chat_context.speakers[session])
+                    if self.living.quiet_sleep(now, session):
+                        return {"action": "abort"}
+                elif not handled_wake and text and self.config.life.private_wake_probability and self.living.quiet_sleep(now):
+                    self.chat_context.wake_candidates[session] = self.chat_context.speakers[session]
+            self.chat_context.messages[session] = message.get("processed_plain_text") or ""
             return {"action": "continue"}
         # 接收 Hook 早于会话创建；先打开原生会话，首次使用指令也能收到回复。
         info = message["message_info"]
@@ -673,7 +712,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         activity = current["title"] if current and self.engine.visible(current, session) else "正在处理其他安排" if current else "空闲"
         state = self.engine.state()
         message = (
-            f"MaiWeave 0.12.1\n启用：{self.config.life.enabled}\n当前：{activity}\n"
+            f"MaiWeave 0.12.6\n启用：{self.config.life.enabled}\n当前：{activity}\n"
             f"精力：{state['energy']:.0f}；饥饿：{state['hunger']:.0f}；心情：{state['mood']:.0f}\n"
             f"聊天流：{session}\n原生记忆连接：{'已配置' if self.config.memory.enabled else '未配置'}\n"
             f"最近运行错误：{self.last_error or '无'}"

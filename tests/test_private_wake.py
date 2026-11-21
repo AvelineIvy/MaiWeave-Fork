@@ -124,5 +124,43 @@ async def test_keyword_still_requires_intimacy_with_probability_off(plugin):
 
 def test_default_and_schema(plugin):
     defaults=plugin.get_default_config()
+    assert defaults["life"]["sleep_skip_private_planner"] is False
+    assert "sleep_skip_private_planner" in plugin.get_webui_config_schema()["sections"]["sleep"]["fields"]
     assert defaults["life"]["private_wake_probability"]==0
     assert type(plugin.config.life).model_fields["private_wake_probability"].json_schema_extra["label"]=="私聊消息唤醒概率（%）"
+
+
+@pytest.mark.parametrize("hour,nap,schedule,enabled,expected", [
+    (23, False, True, True, "abort"), (14, True, True, True, "abort"),
+    (14, False, True, True, "continue"), (23, True, False, True, "continue"),
+    (23, True, True, False, "continue"),
+])
+async def test_private_sleep_gate(plugin, hour, nap, schedule, enabled, expected):
+    prepare(plugin, hour, probability=0)
+    plugin.config.life.sleep_skip_private_planner = enabled
+    plugin.config.life.schedule_enabled = schedule
+    plugin.config.life.nap_quiet = nap
+    assert (await receive(plugin))["action"] == expected
+    assert ("private" in plugin.chat_context.messages) == (expected == "continue")
+    assert (await receive(plugin, group=True))["action"] == "continue"
+    assert (await receive(plugin, "/help"))["action"] == "continue"
+
+
+@pytest.mark.parametrize("keyword", [True, False])
+async def test_private_sleep_gate_wakes_before_planner_and_finishes_farewell(plugin, monkeypatch, keyword):
+    now = prepare(plugin)
+    plugin.config.life.sleep_skip_private_planner = True
+    person = plugin.anniversaries.save_profile("聊天对象", "private", "u")
+    with plugin.store.db:
+        plugin.store.put("profile", {**person, "intimacy": 3, "intimacy_mode": "manual"})
+    draw = Mock(return_value=0)
+    monkeypatch.setattr("maiweave.life.living.random.random", draw)
+    assert (await receive(plugin, "陪陪我" if keyword else "今天怎么样"))["action"] == "continue"
+    assert plugin.living.awake_until(now)
+    await turn(plugin)
+    assert draw.call_count == int(not keyword)
+    assert (await receive(plugin, "我先去睡了，晚安"))["action"] == "continue"
+    assert plugin.living.farewell(now)
+    await plugin.planner_receipt("private", [])
+    plugin.config.life.private_wake_probability = 0
+    assert (await receive(plugin))["action"] == "abort"

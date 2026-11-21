@@ -170,6 +170,16 @@ async def test_invalid_candidate_number_retries(plugin):
     assert result.candidate == 1 and plugin.ctx.llm.generate.await_count == 2
 
 
+@pytest.mark.parametrize("candidate", [0, None])
+async def test_wait_with_unused_candidate_uses_one_call(plugin, candidate):
+    reason = "等对方忙完再聊" * 60
+    plugin.ctx.llm.generate.side_effect = [{"success": True, "response": json.dumps(
+        {"send": False, "candidate": candidate, "reason": reason})}]
+    decision = await plugin.living.receipts.decide("a", ["刚买到了盐"], plugin.now(), plugin.config)
+    assert not decision.send and decision.reason == reason[:300]
+    assert plugin.ctx.llm.generate.await_count == 1
+
+
 async def test_used_greeting_window_does_not_open_ordinary_shares(plugin, monkeypatch):
     from test_proactive_modes import prepare
     now = prepare(plugin, monkeypatch)

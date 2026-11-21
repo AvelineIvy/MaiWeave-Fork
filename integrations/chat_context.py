@@ -1,6 +1,7 @@
 """按话题、聊天场景和字符预算组织生活上下文。"""
 
 import json
+import re
 from collections import deque
 from copy import deepcopy
 
@@ -11,8 +12,8 @@ GUIDE = (
     "用 maiweave 工具保存变化；记录查 maiweave_query，人物历史查 query_memory。"
     "资料冲突说明修改 ID，明确同意后用 maiweave_confirm_change。"
     "sleep_policy.quiet=true时静默。睡眠中需要陪伴用maiweave_wake，awake=true后回应，false结束本轮。提供reply时用它发送，after_reply=stop为发送后结束。"
-    "energy<=25时疲惫，简短接话；bedtime为预计入睡时间，普通休息照常聊，临睡或道别时说晚安。"
-    "person_states 是当时近况，same_chat=false 时承接近况。shared_topics 是实际分享，接话用 maiweave_share_followup 关联 ID。"
+    "energy<=25简短接话，普通休息照常聊。bedtime是你的睡点。困了先道别，双方都困就互道晚安。"
+    "person_states 是当时近况，same_chat=false 时承接近况。"
     "读书沿用书名和笔记，原文与感想分别表述；查笔记用 maiweave_books 的 notes、book_id，安排阅读填 book_id。"
     "跨地点用 maiweave_space 查路线，目标填 goal_step_id；梦境说梦见，资讯带出处。\n"
 )
@@ -28,6 +29,34 @@ OMIT = {"history", "changes", "memory_id", "memory_revision", "payload", "materi
 
 def dump(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def discovered_tools(items, definitions, names):
+    """把宿主本轮搜索命中的麦织工具带进下一次模型请求。"""
+    result = list(definitions)
+    present = {tool.get("function", {}).get("name") for tool in definitions}
+    for item in reversed(items):
+        if item.get("item_type") == "UserMessageItem":
+            if any(p.get("text", "").startswith(("<message ", "<plugin_proactive_task", "<internal_", "<subagent_result"))
+                   for p in item.get("parts", [])):
+                break
+        if item.get("item_type") != "FunctionCallOutputItem" or item.get("tool_name") != "tool_search":
+            continue
+        output = item.get("output")
+        if isinstance(output, str):
+            try:
+                output = json.loads(output)
+            except ValueError:
+                continue
+        if not isinstance(output, dict) or output.get("status") != "loaded":
+            continue
+        query = output.get("query")
+        for function in output.get("tools", []):
+            name = function.get("name")
+            if name in names and name not in present and (query not in names or name == query):
+                result.append({"type": "function", "function": function})
+                present.add(name)
+    return result
 
 
 def brief(value, chars, count):
@@ -82,7 +111,7 @@ class ChatContext:
             streams = await self.plugin.ctx.chat.get_all_streams(platform="all_platforms")
             self.kinds.update({s["stream_id"]: "group" if s.get("group_id") else "private" for s in streams})
 
-    def build(self, session, book_id="", text="", stage="Planner"):
+    def build(self, session, book_id="", text="", stage="Planner", *, followup_ids=None):
         p = self.plugin
         cfg, now = p.config.context, p.now()
         group = self.kinds.get(session) == "group"
@@ -150,7 +179,9 @@ class ChatContext:
             add("person_states", people(p.presence.context(session, now)), True)
         add("encounters", p.presence.encounter_context(session, self.speakers.get(session, ""), now, group, offer=stage == "Planner"), True)
         if cfg.sharing and p.config.proactive.enabled:
-            add("shared_topics", p.living.receipts.context(session, now), True)
+            acknowledgement = re.fullmatch(r"(嗯+|哦+|噢+|啊+|这样|原来如此|好[的吧]?|知道了|明白了|收到)[呀啊哦呢啦哇哈]*[\s。！!，,.~～]*", text.strip())
+            if not acknowledgement:
+                add("shared_topics", p.living.receipts.context(session, now), True)
         if p.config.diary.chat_images_enabled:
             add("life_images", p.life_images.context(session), True)
         if cfg.reading and (reading_topic or mode != "精简"):
@@ -217,6 +248,8 @@ class ChatContext:
             options = [brief(value, chars, count), brief(value, min(chars, 120), 1)]
             if key == "pending_changes":
                 options.append([{k: row[k] for k in ("id", "action")} for row in value[:1]])
+            if key == "shared_topics":
+                options.append([{"id": value[0]["id"], "topic": value[0]["topic"][:80]}])
             for selected in options:
                 candidate = deduplicate({**snapshot, key: selected})
                 if (len(GUIDE) + len(dump(candidate)) <= budget
@@ -228,6 +261,8 @@ class ChatContext:
         sections = [{"category": LABELS[key], "chars": len(dump({key: value})) - 1}
                     for key, value in snapshot.items() if key in LABELS]
         if stage == "Planner":
+            if followup_ids is not None:
+                followup_ids.extend(row["id"] for row in snapshot.get("shared_topics", []))
             p.presence.offered_context(session, self.speakers.get(session, ""), now, bool(snapshot.get("encounters") and snapshot["encounters"][0].get("stage") == "群里遇见"))
         result = GUIDE + dump(snapshot)
         self.recent.appendleft({"at": now.strftime("%m-%d %H:%M:%S"), "session": session,
