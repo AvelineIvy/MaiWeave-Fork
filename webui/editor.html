@@ -15,14 +15,10 @@ dialog{top:calc(var(--maibot-viewport-top,0px) + 88px);bottom:auto;margin:0 auto
 .dialog-header{position:sticky;top:-24px;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:16px;background:var(--card);margin:-24px -24px 16px;padding:16px 24px;border-bottom:1px solid var(--line)}.dialog-header h2{margin:0;font-size:19px}.dialog-header button{flex:none}.pagination{display:flex;justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0 20px}.pagination span{margin-right:auto;color:var(--maibot-muted,#68766d)}
 .record-title,.maibot-button.record small{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}.maibot-button.record small{-webkit-line-clamp:2}#pageDetails label.inline-checkbox{display:flex}
 .usage-bars{max-height:320px;overflow:auto;padding:12px 0}.usage-bar{display:grid;grid-template-columns:90px 1fr 100px;align-items:center;gap:14px;margin:8px 0}.usage-bar>div{height:12px;background:color-mix(in srgb,var(--accent) 8%,var(--card));border-radius:4px}.usage-bar span{display:block;height:100%;background:var(--accent);border-radius:4px}.usage-bar>small:last-child{text-align:right}@media(max-width:500px){.usage-bar{grid-template-columns:78px 1fr 85px;gap:7px}}
-#walletPanel ul{padding-left:18px}#walletPanel output{font-weight:bold;color:var(--accent);font-size:22px}
 </style></head>
 <body class="maibot-page">
 <header><span class="page-mark" aria-hidden="true">✦</span><h1 id="heading">生活页面</h1><p class="maibot-muted" id="intro">选中记录，修改表单，再保存。已有内容会自动填入。</p></header>
-<section id="walletPanel" class="panel" hidden><h2>麦麦的钱包</h2><output id="walletBalance"></output><p id="walletStatus"></p>
-<form id="openingForm"><label>起始生活费（虚拟元） <input id="openingCash" type="number" min="0" step="1" required></label>
-<button class="maibot-button">保存起始生活费</button></form><h3>最近收支</h3><ul id="paymentList"></ul>
-<h3>私聊借还</h3><ul id="loanList"></ul></section>
+
 <details id="retentionPanel" class="panel" hidden><summary>数据保留与清理</summary>
 <p>保留设置：插件配置 → 高级设置 → 数据保留。日记、空间发布记录、阅读笔记和梦境长期保存；Token 统计按保留的调用明细汇总。7分及以上的重要经历、手动保留和仍在使用的记录继续保留。</p>
 <p id="retentionStatus" role="status"></p><div id="retentionCounts"></div>
@@ -217,16 +213,6 @@ function renderPager(host,info,load){
  const label=document.createElement('span');label.textContent=`第 ${info.page} / ${info.pages} 页`;host.append(label);
  for(const [name,delta] of [['上一页',-1],['下一页',1]]){const button=document.createElement('button');button.className='maibot-button';button.textContent=name;button.disabled=info.page+delta<1||info.page+delta>info.pages;button.onclick=()=>run(()=>load(info.page+delta));host.append(button)}
 }
-function drawWallet(data){
- $('walletPanel').hidden=false;
- $('walletBalance').textContent=data.wallet.balance+' 虚拟元';
- $('openingForm').hidden=Boolean(data.payments.length);
- if(document.activeElement!==$('openingCash'))$('openingCash').value=data.wallet.opening;
- $('openingForm').onsubmit=async e=>{e.preventDefault();try{await maibot.action('opening',{amount:Number($('openingCash').value)});await renderView();$('walletStatus').textContent='已保存'}catch(error){$('walletStatus').textContent=error.message}};
- function list(id,rows,empty){const target=$(id);target.replaceChildren();for(const text of rows.length?rows:[empty]){const li=document.createElement('li');li.textContent=text;target.append(li)}}
- list('paymentList',data.payments.map(r=>r.at.slice(5,16).replace('T',' ')+' · '+r.title+' '+(r.amount>0?'+':'')+r.amount+'元'),'还没有收支');
- list('loanList',data.loans.slice().reverse().map(r=>r.title+' · '+r.status+' · '+r.amount+'元'+(r.owed?'（待还'+r.owed+'元）':'')),'还没有借还记录');
-}
 async function renderView(){
  const definition=pageMeta.view;
  for(const [alias,binding] of Object.entries(definition.queries)){
@@ -234,7 +220,6 @@ async function renderView(){
   if(binding.parameters?.page)args.page=viewPages[alias]||1;
   viewData[alias]=await maibot.query('view_'+alias,args);
  }
- if(maibot.page.id==='space')drawWallet(viewData.data);
  let host=$('pageDetails');if(!host){host=document.createElement('details');host.id='pageDetails';host.open=!pageMeta.categories.length||maibot.page.id==='continuity';host.className='panel';host.style.marginTop='20px';document.querySelector('main').after(host)}
  drawView(host);
 }

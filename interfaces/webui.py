@@ -515,6 +515,7 @@ class WebUI:
         start = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=day_offset)
         end = start + timedelta(days=1)
         plans = self.store.all("plan", omit=("changes",))
+        data.update(self.wallet_summary())
         data["map"] = self.life_map(sorted(plans, key=lambda p: self.engine.time(p["start"])))
         daily = sorted((p for p in plans if p["status"] != "cancelled" and self.engine.time(p["start"]) < end
                         and self.engine.time(p["end"]) > start), key=lambda p: self.engine.time(p["start"]))
@@ -766,7 +767,10 @@ class WebUI:
     @API("ui_space", description="地点、路线及移动进度")
     async def ui_space(self) -> dict:
         plans = sorted(self.store.all("plan", omit=("changes",)), key=lambda p: self.engine.time(p["start"]))
-        return {**self.life_map(plans), "wallet": self.engine.wallet.account(),
+        return {**self.life_map(plans), **self.wallet_summary()}
+
+    def wallet_summary(self):
+        return {"wallet": self.engine.wallet.account(),
                 "payments": self.store.page("payment", size=20, time_field="at")["items"],
                 "loans": self.store.all("money_request")[-10:]}
 
