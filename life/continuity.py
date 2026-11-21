@@ -116,6 +116,7 @@ class Continuity:
                        "描述为网上读到或了解到；后续想实践的事情放入next_action，适合的日期放入next_date。")
         if enrich:
             prompt += SCORE_GUIDE
+            prompt += "在本次地点遇到合情合理的带薪帮工机会时，可在next_action写明具体工作，hourly_pay填约定的整数时薪。普通见闻填0。"
             prompt += (
                 "为这次已完成的角色活动补充过程和结果，接续已有作品进度与细节，"
                 "按活动时长安排合理进展，内容围绕角色独自进行的活动展开。"
@@ -171,7 +172,7 @@ class Continuity:
                     store.put("preference", previous)
                     store.put("activity_memory", {"id": memory_key, "session_id": plan["session_id"], "activity": result.activity,
                                                    "subject": result.subject, "next_action": result.next_action, "details": event["details"],
-                                                   "experience_id": event["id"], "updated_at": now.isoformat(),
+                                                   "experience_id": event["id"], "hourly_pay": getattr(result, "hourly_pay", 0), "updated_at": now.isoformat(),
                                                    "next_date": result.next_date.isoformat() if result.next_date else "",
                                                    "kind": plan["kind"], "location": plan["location"], "completed": result.completed,
                                                    "last_continued_at": now.isoformat()})

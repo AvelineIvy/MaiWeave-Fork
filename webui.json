@@ -376,6 +376,10 @@
             "simulation": {
               "type": "boolean",
               "required": false
+            },
+            "pay": {
+              "type": "integer",
+              "minimum": 0
             }
           }
         },
@@ -446,6 +450,10 @@
             "rule_id": {
               "type": "string",
               "required": true
+            },
+            "pay": {
+              "type": "integer",
+              "minimum": 0
             }
           }
         },
@@ -548,6 +556,10 @@
             "rule_id": {
               "type": "string",
               "required": false
+            },
+            "pay": {
+              "type": "integer",
+              "minimum": 0
             }
           }
         },
@@ -1841,6 +1853,10 @@
             "mode": {
               "type": "string",
               "required": false
+            },
+            "fare": {
+              "type": "integer",
+              "minimum": 0
             }
           }
         },
@@ -1933,6 +1949,10 @@
             "mode": {
               "type": "string",
               "required": false
+            },
+            "fare": {
+              "type": "integer",
+              "minimum": 0
             }
           }
         },
@@ -1957,6 +1977,17 @@
             "force": {
               "type": "boolean",
               "required": false
+            }
+          }
+        },
+        "opening": {
+          "api": "ui_wallet_opening",
+          "version": "1",
+          "parameters": {
+            "amount": {
+              "type": "integer",
+              "minimum": 0,
+              "required": true
             }
           }
         }

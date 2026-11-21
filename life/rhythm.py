@@ -29,6 +29,8 @@ class Rhythm:
         self.engine, self.spatial, self.config = engine, spatial, config
 
     def save(self, value: RoutineInput, session: str, now, rule_id: str = "", user_id=None) -> dict:
+        if value.pay and value.kind != "work":
+            raise ValueError("有班次报酬的日程请选择工作类型")
         anchor = date.fromisoformat(value.anchor_date)
         time.fromisoformat(value.start_time)
         if value.until and date.fromisoformat(value.until) < anchor:
@@ -36,6 +38,8 @@ class Rhythm:
         if value.frequency == "weekly" and (not value.weekdays or any(d not in range(7) for d in value.weekdays)):
             raise ValueError("每周规则需填写星期，周一为0，周日为6")
         old = self.engine.owned("routine", rule_id, session) if rule_id else None
+        if old and value.kind == "work" and "pay" not in value.model_fields_set:
+            value = value.model_copy(update={"pay": old.get("pay", 0)})
         record = {"id": rule_id or uid(), **value.model_dump(), "session_id": session, "status": "active",
                   "request_user_id": user_id, "revision": old["revision"] + 1 if old else 1, "exceptions": old["exceptions"] if old else [], "updated_at": now.isoformat()}
         with self.engine.store.db:
@@ -77,12 +81,14 @@ class Rhythm:
 
     def materialize(self, now):
         zone = ZoneInfo(self.engine.timezone)
+        worked = {(p["routine_id"], p.get("routine_date")) for p in self.engine.store.all("plan")
+                  if p.get("routine_id") and p["kind"] == "work" and p["status"] in {"active", "paused", "awaiting_confirmation", "completed"}}
         for rule in self.engine.store.all("routine"):
             if rule["status"] != "active":
                 continue
             for offset in range(self.config.rhythm.horizon_days):
                 day = now.date() + timedelta(days=offset)
-                if not matches(rule, day):
+                if not matches(rule, day) or (rule["id"], day.isoformat()) in worked:
                     continue
                 key = f"{rule['id']}:{rule['revision']}:{day.isoformat()}"
                 if self.engine.store.find("occurrence", key):
@@ -98,7 +104,7 @@ class Rhythm:
                     with self.engine.store.db:
                         self.engine.store.put("routine_issue", {"id": key, "routine_id": rule["id"], "day": day.isoformat(), "title": rule["title"], "message": str(error)})
                     continue
-                plan.update(routine_id=rule["id"], routine_date=day.isoformat())
+                plan.update(routine_id=rule["id"], routine_date=day.isoformat(), pay=rule.get("pay", 0))
                 with self.engine.store.db:
                     self.engine.store.put("plan", plan)
                     self.engine.store.put("occurrence", {"id": key, "plan_id": plan["id"]})

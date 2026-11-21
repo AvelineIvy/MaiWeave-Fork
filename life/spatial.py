@@ -63,12 +63,14 @@ class Spatial:
                         self.engine.store.put(category, item)
         return record
 
-    def save_route(self, origin: str, destination: str, minutes: int, mode: str) -> dict:
+    def save_route(self, origin: str, destination: str, minutes: int, mode: str, fare: int = 0) -> dict:
+        if fare < 0:
+            raise ValueError("车费须为非负整数")
         a, b = self.place(origin), self.place(destination)
         if a["id"] == b["id"] or minutes < 1:
             raise ValueError("路线需连接两个不同地点，耗时至少一分钟")
         key = ":".join(sorted([a["id"], b["id"]]))
-        record = {"id": key, "origin": a["id"], "destination": b["id"], "minutes": minutes, "mode": mode}
+        record = {"id": key, "origin": a["id"], "destination": b["id"], "minutes": minutes, "mode": mode, "fare": fare}
         with self.engine.store.db:
             for old in self.engine.store.all("route"):
                 if {old["origin"], old["destination"]} == {a["id"], b["id"]}:
@@ -81,7 +83,7 @@ class Spatial:
         graph = {}
         for edge in self.engine.store.all("route"):
             for a, b in [(edge["origin"], edge["destination"]), (edge["destination"], edge["origin"])]:
-                graph.setdefault(a, []).append((b, edge["minutes"], edge["mode"]))
+                graph.setdefault(a, []).append((b, edge["minutes"], edge["mode"], edge.get("fare", 0)))
         serial = count()
         queue, visited = [(0, next(serial), start["id"], [])], set()
         while queue:
@@ -91,9 +93,11 @@ class Spatial:
             visited.add(node)
             if node == end["id"]:
                 return {"origin": start["name"], "destination": end["name"], "minutes": minutes, "legs": legs}
-            for target, duration, mode in graph.get(node, []):
+            for target, duration, mode, fare in graph.get(node, []):
                 if target not in visited:
                     leg = {"origin": self.place(node)["name"], "destination": self.place(target)["name"], "minutes": duration, "mode": mode}
+                    if fare:
+                        leg["fare"] = fare
                     heapq.heappush(queue, (minutes + duration, next(serial), target, legs + [leg]))
         raise ValueError("地点之间没有连通路线，请先补充路线")
 

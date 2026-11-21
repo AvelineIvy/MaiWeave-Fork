@@ -657,7 +657,7 @@ class WebUI:
     async def ui_save_routine(self, title: str, anchor_date: str, start_time: str, duration_minutes: int,
                               frequency: str = "weekly", interval: int = 1, weekdays: str = "周一,周二,周三,周四,周五",
                               month_day: int = 1, until: str = "", kind: str = "leisure", location: str = "",
-                              session_id: str = "", participants: str = "", simulation: bool = True, rule_id: str = "") -> dict:
+                              session_id: str = "", participants: str = "", simulation: bool = True, rule_id: str = "", pay: int | None = None) -> dict:
         self.require_life()
         names = [v.strip() for v in weekdays.replace("，", ",").split(",") if v.strip()]
         if any(name not in WEEKDAYS for name in names):
@@ -666,7 +666,7 @@ class WebUI:
             session_id = self.store.get("routine", rule_id)["session_id"]
         value = RoutineInput(title=title, anchor_date=anchor_date, start_time=start_time, duration_minutes=duration_minutes,
                              frequency=frequency, interval=interval, weekdays=[WEEKDAYS[n] for n in names], month_day=month_day,
-                             until=until, kind=kind, location=location, participants=[v.strip() for v in participants.split(",") if v.strip()], simulation=simulation)
+                             until=until, kind=kind, **({"pay": pay} if pay is not None else {}), location=location, participants=[v.strip() for v in participants.split(",") if v.strip()], simulation=simulation)
         rule = self.rhythm.save(value, session_id, self.now(), rule_id)
         self.rhythm.materialize(self.now())
         return rule
@@ -768,18 +768,33 @@ class WebUI:
         names = {p["id"]: p["name"] for p in places}
         current = self.engine.current(self.now())
         route = current.get("route") if current else None
+        plans = sorted(self.store.all("plan", omit=("changes",)), key=lambda p: self.engine.time(p["start"]))
+        upcoming = next((p for p in plans if p["status"] == "scheduled" and not p.get("activity_id")
+                         and self.engine.time(p["start"]) >= self.now()), None)
         return {"location": self.engine.state()["location"], "places": [{**p, "outdoor_label": "室外" if p["outdoor"] else "室内"} for p in places],
                 "routes": [{**r, "origin_name": names[r["origin"]], "destination_name": names[r["destination"]]} for r in self.store.all("route")],
                 "journey": self.engine.state().get("journey") or {"location": self.engine.state()["location"], "next": "", "progress": 100, "mode": "停留", "destination": ""},
-                "legs": route["legs"] if route else []}
+                "legs": route["legs"] if route else [], "next_stop": {
+                    "location": upcoming["location"], "at": upcoming["start"]} if upcoming else None, "wallet": self.engine.wallet.account(),
+                "payments": self.store.page("payment", size=20, time_field="at")["items"],
+                "loans": self.store.all("money_request")[-10:],
+                "visits": [{"location": p["location"], "title": p["title"], "at": p["end"]} for p in
+                           sorted(plans, key=lambda p: self.engine.time(p["end"])) if p["status"] == "completed" and p["kind"] != "travel"][-40:],
+                "shifts": [{"location": p["location"], "title": p["title"], "at": p["start"], "pay": p.get("pay", 0)}
+                           for p in plans
+                           if p["kind"] == "work" and p["status"] in {"active", "scheduled"}][:30]}
+
+    @API("ui_wallet_opening", description="设置第一笔收支前的起始生活费")
+    async def ui_wallet_opening(self, amount: int) -> dict:
+        return self.engine.wallet.set_opening(amount)
 
     @API("ui_save_place", description="添加或编辑地点")
     async def ui_save_place(self, name: str, outdoor: bool = False, description: str = "", place_id: str = "") -> dict:
         return self.spatial.save_place(name, outdoor, description, place_id)
 
     @API("ui_save_route", description="添加或更新双向路线")
-    async def ui_save_route(self, origin: str, destination: str, minutes: int, mode: str = "步行") -> dict:
-        return self.spatial.save_route(origin, destination, minutes, mode)
+    async def ui_save_route(self, origin: str, destination: str, minutes: int, mode: str = "步行", fare: int = 0) -> dict:
+        return self.spatial.save_route(origin, destination, minutes, mode, fare)
 
     @API("ui_move", description="开始移动到指定地点")
     async def ui_move(self, destination: str) -> dict:

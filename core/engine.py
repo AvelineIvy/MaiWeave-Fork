@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from .models import ExperienceInput, GoalInput, LifeState, PlanInput, PlanPatch, RelationshipChange, local_time
 from .store import Store
+from .wallet import Wallet
 
 ACTIVE = {"scheduled", "active"}
 
@@ -58,6 +59,7 @@ def read_life_status(store: Store, now: datetime, *, enabled: bool, schedule_ena
 class LifeEngine:
     def __init__(self, store: Store, timezone: str, now: datetime):
         self.store = store
+        self.wallet = Wallet(store)
         self.timezone = timezone
         ZoneInfo(timezone)
         if not store.find("runtime", "experience_score_10"):
@@ -163,6 +165,10 @@ class LifeEngine:
             raise ValueError("结束时间必须在当前时间之后")
         self._check_interval(start, end, {record_id, plan.get("travel_id", "")})
         updated.update(start=start.isoformat(), end=end.isoformat())
+        if updated["kind"] != plan["kind"]:
+            updated.update(pay=0, cost=0, hourly_pay=0, purchase_request="")
+        elif updated.get("hourly_pay"):
+            updated["pay"] = round(updated["hourly_pay"] * (end - start).total_seconds() / 3600)
         updated["changes"].append({"at": now.isoformat(), "before": {k: plan[k] for k in changes}, "after": changes})
         if "start" in changes or updated["status"] == "blocked":
             updated["status"] = "scheduled"
@@ -230,6 +236,7 @@ class LifeEngine:
                 plan["experience_id"] = record["id"]
                 plan["changes"].append({"at": now.isoformat(), "action": "record_completion", "source": value.source})
                 self.store.put("plan", plan)
+                self.wallet.settle(plan, occurred)
                 self.progress_goal(plan, confirmed=True)
                 state = self.state()
                 self._completion_effect(state, plan)
@@ -495,6 +502,7 @@ class LifeEngine:
             record["summary"] = f"结束{plan['title']}的阅读时段，正文笔记正在整理"
         plan.update(status="completed", experience_id=record["id"])
         self.store.put("experience", record)
+        self.wallet.settle(plan, now)
         if plan.get("book_id") and plan.get("goal_id") and not plan.get("goal_step_id"):
             plan["reading_goal_pending"] = True
         elif not plan.get("book_id"):

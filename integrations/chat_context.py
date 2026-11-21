@@ -161,11 +161,17 @@ class ChatContext:
         def add(key, value, relevant=False):
             if value:
                 candidates.append((0 if key == "pending_changes" else 1 if key == "bookshelf" and book_id else 2 if relevant else 3, key, value))
+        if not group:
+            requests = [r for r in store.all("money_request") if r["session"] == session
+                        and r["user"] == self.speakers.get(session)]
+            if requests and any(w in text for w in ("借", "钱", "还款", "给你", "送你", "工资", "元")):
+                add("虚拟钱包", {"余额": engine.wallet.account()["balance"], "最近借款":
+                    select_fields(requests[-1], ("id", "title", "amount", "status", "owed")), "工具": "maiweave_wallet"}, True)
         def rows(category):
             return [r for r in store.all(category) if engine.visible(r, session)]
         def people(rows):
             return sorted(rows, key=lambda row: row.get("user_id") != self.speakers.get(session))
-        schedule_topic = any(w in text for w in ("安排", "日程", "明天", "约", "取消", "计划", "几点", "去哪", "出门"))
+        schedule_topic = any(w in text for w in ("安排", "日程", "明天", "约", "取消", "计划", "几点", "去哪", "出门", "上班", "下班", "排班", "工作"))
         reading_topic = bool(book_id) or any(w in text for w in ("书", "阅读", "章节", "读到"))
         people_topic = any(w in text for w in ("生日", "纪念日", "称呼", "资料", "关系"))
         continuation_topic = any(w in text for w in ("继续", "上次", "昨天", "目标", "进度", "后来"))

@@ -483,11 +483,13 @@ class Living:
         if free < 10:
             return f"距离下一项安排只剩 {free} 分钟"
         state = engine.state()
+        wallet = engine.wallet
+        spending_note = wallet.planning_note(now)
         signature = hashlib.sha256(json.dumps({
             "day": now.date().isoformat(), "sleep": config.schedule_enabled and in_hours(now.hour, config.sleep_hour, config.wake_hour),
             "body": [state["hunger"] >= 65, state["energy"] <= 25, state["stress"] >= 70],
             "plans": [(p["id"], p["status"], p["start"], p["end"], len(p["changes"])) for p in engine.store.all("plan")],
-            "goals": engine.store.all("goal"), "interests": config.interests,
+            "goals": engine.store.all("goal"), "interests": config.interests, "balance": wallet.account()["balance"], "spending_note": spending_note,
             "continuations": [(r["id"], r["updated_at"]) for r in engine.store.all("activity_memory")],
             "weather": self.world.context(now)["weather"],
             "chat_arrangements": self.continuity.chat_arrangements(now),
@@ -499,6 +501,7 @@ class Living:
         with engine.store.db:
             engine.store.put("runtime", {"id": "planning", "at": now.isoformat(), "signature": signature})
         session = ""
+        cost = hourly_pay = 0
         exploration = await self.world.exploration_status(now) if self.config.world.explore_enabled else {"ready": False}
         research_query, research_freshness = "", "current"
         search_ready = self.config.world.places_enabled and (await self.world.search_status())["ready"]
@@ -574,7 +577,7 @@ class Living:
                 ("preferences", ("activity", "score"), sorted(context["preferences"], key=lambda r: abs(r["score"]), reverse=True)[:8]),
                 ("threads", ("title", "due_at"), sorted(context["threads"], key=lambda r: r["due_at"])[:6]),
                 ("effects", ("reason", "mood", "stress"), context["effects"][-6:]))}
-            candidates = [select_fields(r, ("id", "activity", "subject", "next_action", "next_date", "location", "completed")) for r in continuations]
+            candidates = [select_fields(r, ("id", "activity", "subject", "next_action", "next_date", "location", "completed", "hourly_pay")) for r in continuations]
             step = {"goal_id": next_step[0]["id"], **select_fields(next_step[1], ("id", "title", "criterion", "minutes", "kind"))} if next_step else None
             habit = select_fields(habit or {}, ("title", "location", "kind", "minute"))
             prompt = (
@@ -596,6 +599,9 @@ class Living:
                 "motivation 简短说明这次继续或切换的具体理由。"
                 "时长按这次想完成的小事选择：随手收拾、坐一会儿可用10至20分钟；读一段、做一道菜按内容与空档安排。"
                 "疲惫或兴趣一般时选短一点，有具体兴致时可多留些时间。空闲也可以安静歇一会儿。"
+                f"最近打算花的钱：{spending_note}。"
+                f"钱包有{wallet.account()['balance']}元虚拟生活费。买材料或外食时cost填本次实际消费的整数元，使用现有物品填0，车费沿用路线。量入为出。"
+                "固定职业和班次沿用已排的工作日程。可接续念头有hourly_pay时，可在原地点做这份零工，kind选work并填写continuation_id；结合时薪、兴趣和空闲决定。"
                 f"此刻的习惯候选：{json.dumps(habit, ensure_ascii=False)}；目标下一步：{json.dumps(step, ensure_ascii=False)}；"
                 f"可接续的具体念头：{json.dumps(candidates, ensure_ascii=False)}。"
                 "选择接续时填写 continuation_id，并在活动里回应该念头；选择目标时填写 goal_id 和 goal_step_id。"
@@ -630,6 +636,10 @@ class Living:
             def validate_activity(choice):
                 if state["hunger"] >= 65 and choice.kind not in {"cook", "meal"}:
                     raise ValueError("当前饥饿程度已达到65，请选择吃饭meal或做饭cook；已有待吃饭菜时优先meal")
+                if choice.continuation_id:
+                    offer = next((r for r in continuations if r["id"] == choice.continuation_id), {})
+                    if offer.get("hourly_pay") and (choice.kind != "work" or choice.location != offer["location"] or choice.place_query):
+                        raise ValueError("接这份零工时请选择工作类型和机会里已有的地点")
                 travel = self.spatial.route(state["location"], choice.location)["minutes"] if choice.location else 0
                 start = now + timedelta(minutes=travel)
                 end = start + timedelta(minutes=min(choice.minutes, free))
@@ -655,10 +665,13 @@ class Living:
             book_id = choice.book_id
             goal_id = choice.goal_id
             goal_step_id = choice.goal_step_id
+            cost = choice.cost
             if choice.continuation_id:
                 continuation = next(r for r in continuations if r["id"] == choice.continuation_id)
                 continuation_id, session = continuation["id"], continuation["session_id"]
                 source = "接续生活念头"
+                if kind == "work" and location == continuation["location"] and not place_query:
+                    hourly_pay = continuation.get("hourly_pay", 0)
             if goal_id:
                 goal = engine.store.get("goal", goal_id)
                 session = goal["session_id"]
@@ -672,7 +685,8 @@ class Living:
             return "规划期间已有活动开始"
         state = engine.state()
         free = engine.free_minutes(now)
-        travel_minutes = self.spatial.route(state["location"], location)["minutes"] if location else 0
+        route = self.spatial.route(state["location"], location) if location else {"minutes": 0, "legs": []}
+        travel_minutes = route["minutes"]
         minutes = min(minutes, free - travel_minutes)
         if source == "睡前收尾" and self.bedtime(now) and (self.bedtime(now) - now).total_seconds() / 60 <= travel_minutes:
             title, kind, motivation = "睡觉", "sleep", "回到住处后按作息休息"
@@ -693,7 +707,8 @@ class Living:
                 title, kind, location, motivation = "回家准备休息", "rest", home, "收好手边的事，准备睡觉"
                 research_query = ""
                 source, book_id, goal_id, goal_step_id, continuation_id = "睡前收尾", "", "", "", ""
-                travel_minutes = self.spatial.route(state["location"], home)["minutes"]
+                route = self.spatial.route(state["location"], home)
+                travel_minutes = route["minutes"]
                 minutes = min(free - travel_minutes, max(1, int((bedtime - now).total_seconds() / 60) - travel_minutes))
         upcoming = sorted((p for p in engine.store.all("plan") if not p.get("activity_id")
                            and p["status"] in {"scheduled", "active"} and engine.time(p["start"]) > now),
@@ -711,11 +726,20 @@ class Living:
         if book_id:
             book = engine.store.get("book", book_id)
             title = f"阅读《{book['title']}》"
+        if source == "睡前收尾":
+            cost = hourly_pay = 0
+        price = cost + sum(leg.get("fare", 0) for leg in route["legs"])
+        if price and price > wallet.account()["balance"] and kind != "sleep":
+            wallet.need(title, price, session, now, continuation_id)
+            return f"暂缓{title}，生活费还差{price - wallet.account()['balance']}元"
         value = PlanInput(title=title, book_id=book_id, start=start.isoformat(), end=(start + timedelta(minutes=minutes)).isoformat(),
                           kind=kind, location=location, motivation=motivation, goal_id=goal_id, goal_step_id=goal_step_id,
                           continuation_id=continuation_id, research_query=research_query, research_freshness=research_freshness)
         plan = self.spatial.schedule(value, session, now, autonomous=True, sleep_deadline=sleep_deadline)
         with engine.store.db:
+            plan.update(cost=cost, hourly_pay=hourly_pay, pay=round(hourly_pay * minutes / 60))
+            if price:
+                plan["purchase_request"] = wallet.purchase_for(session, title, continuation_id)
             plan["decision"] = {"at": now.strftime("%m-%d %H:%M"), "source": source, "title": title,
                                 "place": plan["location"], "minutes": minutes, "reason": motivation, "balance": self.activity_balance(now)}
             engine.store.put("plan", plan)
@@ -956,6 +980,22 @@ class Living:
             screening = (f"近六小时内 {len(in_window)} 条经历，{len(in_window) - len(unseen)} 条已向本聊天流请求分享，"
                          f"{len(unseen) - len(finished)} 条等待笔记或活动回顾，{len(finished) - len(available)} 条等待再次判断")
             notices = []
+            wallet = engine.wallet
+            for request in wallet.pending(now) if ordinary_hours and not pause else []:
+                if "wallet:" + request["id"] in sent.get("notice_ids", []):
+                    continue
+                if request["session"] not in ("", session) or request["source_session"] not in ("", session):
+                    continue
+                streams = await self.ctx.chat.get_all_streams(platform="all_platforms")
+                peer = next((s for s in streams if s["stream_id"] == session), {})
+                user = peer.get("user_id")
+                if user and not (peer.get("group_id") or peer.get("is_group_session")) and self.intimacy(session, user) >= 2:
+                    notice = wallet.notice(request, session, user)
+                    if notice:
+                        notices.append(notice)
+            for request in engine.store.all("money_request"):
+                if request["status"] == "已还清" and request["session"] == session:
+                    notices.append(("repayment:" + request["id"], f"工钱已经到账，也还清了为「{request['title']}」借的{request['amount']}元虚拟生活费，向对方报个信。", None))
             for item in Anniversaries(engine.store).upcoming(now.date(), session):
                 if item["enabled"] and item["days_left"] == 0:
                     notices.append((f"anniversary:{item['id']}:{item['next_date']}",
@@ -1041,7 +1081,7 @@ class Living:
             record_id = notices[0][0] if notices else event["id"]
             topic = "经历分享"
             if notices:
-                topics = {"anniversary": "纪念日", "reminder": "共同安排提醒", "confirmation": "安排确认",
+                topics = {"wallet": "借生活费", "repayment": "归还生活费", "anniversary": "纪念日", "reminder": "共同安排提醒", "confirmation": "安排确认",
                           "thread": "话题跟进", "issue": "日程调整", "greeting": greeting["kind"] if greeting else "作息问候"}
                 topic = topics[record_id.split(":", 1)[0]]
                 score = f"本次处理{topic}"

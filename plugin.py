@@ -272,7 +272,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         now = self.now()
         await self.living.refresh_farewell(now)
         self.living.apply_schedule(now)
-        for name, job in [("跟进到期", self.continuity.expire_threads), ("数据清理", self.retention.daily), ("生活推进", self.engine.advance), ("重复日程", self.rhythm.materialize), ("连续出行", self.spatial.reconcile), ("习惯学习", self.rhythm.learn), ("生活调整", self.living.adjust)]:
+        for name, job in [("跟进到期", self.continuity.expire_threads), ("数据清理", self.retention.daily), ("生活推进", self.engine.advance), ("生活费", self.engine.wallet.refresh), ("重复日程", self.rhythm.materialize), ("连续出行", self.spatial.reconcile), ("习惯学习", self.rhythm.learn), ("生活调整", self.living.adjust)]:
             try:
                 job(now)
                 self.last_errors.pop(name, None)
@@ -407,10 +407,11 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         self.living.receipts.turn[session] = task
         receipt = self.store.find("share_receipt", task) if task else None
         thread = self.store.find("thread", receipt["thread_id"]) if receipt and receipt.get("thread_id") else None
-        if thread and thread.get("plan_id") and not self.continuity.can_report(thread) and not receipt.get("calls"):
+        stale_promise = thread and thread.get("plan_id") and not self.continuity.can_report(thread)
+        if receipt and not receipt.get("calls") and (stale_promise or not self.engine.wallet.current_notice(receipt, self.now())):
             kwargs["tool_definitions"] = [tool for tool in kwargs.get("tool_definitions", [])
                                           if tool.get("function", {}).get("name") in {"wait", "stop"}]
-            kwargs["items"].append({"item_type": "UserMessageItem", "parts": [{"type": "text", "text": "这次报信的日程或聊天已有更新，本轮请静默结束。"}]})
+            kwargs["items"].append({"item_type": "UserMessageItem", "parts": [{"type": "text", "text": "这次主动联系的事情已有更新，本轮请静默结束。"}]})
             return {"action": "continue", "modified_kwargs": kwargs}
         kwargs["items"] = [i for i in kwargs["items"] if i.get("meta", {}).get("item_id") != "maiweave-life-context"]
         latest = next((i for i in reversed(kwargs["items"]) if i["item_type"] == "UserMessageItem"), {})
@@ -473,6 +474,22 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         text = self.chat_context.topics.get(session, "") + " " + kwargs.get("reply_reason", "")
         kwargs["extra_prompt"] += self.context_text(session, book_id, text, "回复")
         return {"action": "continue", "modified_kwargs": kwargs}
+
+    @Tool("maiweave_wallet", description="私聊中查看麦麦的虚拟钱包和与当前用户的借款。对方明确借出用lend、赠送用give、以后再给用promise、拒绝用decline。先查询list取得申请ID，金额沿用申请。", parameters=schema({
+        "action": {"type": "string", "enum": ["list", "lend", "give", "promise", "decline"]},
+        "amount": {"type": "integer", "minimum": 0, "description": "明确给出的虚拟元数，省略表示申请金额"},
+        "request_id": text_field("本次借款申请ID")}, ["action"]))
+    @operation
+    async def wallet_action(self, action: str, request_id: str = "", amount: int = 0, **kwargs):
+        session, user = kwargs["stream_id"], kwargs["user_id"]
+        await self.chat_context.identify(session)
+        if self.chat_context.kinds.get(session) != "private":
+            raise ValueError("请在私聊里处理虚拟钱包")
+        wallet = self.engine.wallet
+        if action == "list":
+            return {"balance": wallet.account()["balance"], "requests": [
+                r for r in self.store.all("money_request") if r["session"] == session and r["user"] == user][-5:]}
+        return wallet.respond(request_id, session, user, action, self.now(), amount)
 
     @Tool("maiweave_person_state", description="记录当前发言人此刻的短期状态。用户说明起床、忙完或返回时间时，用 until 保存结束时间；值得到时关心的事情同时用 maiweave_continuity 的 save_thread 保存。用户改时间时更新近况和原跟进事项，已醒来或忙完时记录空闲并结束对应事项。", parameters=schema({"status": {"type": "string", "enum": ["准备睡觉", "忙碌", "外出", "空闲"]}, "until": text_field("近况结束时间，带时区的 ISO 日期时间；省略时使用该状态的默认时长")}, ["status"]))
     @operation

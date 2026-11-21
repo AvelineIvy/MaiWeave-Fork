@@ -7,6 +7,7 @@ from uuid import uuid4
 from datetime import datetime, timedelta
 
 from ..core.models import ShareDecision
+from ..core.wallet import Wallet
 from .usage import generate
 
 TASK = re.compile(r'^<plugin_proactive_task id="(proactive:ilworkcn\.maiweave:\d+)" plugin_id="ilworkcn\.maiweave">')
@@ -121,6 +122,9 @@ class ShareReceipts:
             thread = self.store.find("thread", row["thread_id"]) if row.get("thread_id") else None
             if thread and thread.get("plan_id") and can_report and not can_report(thread):
                 row.update(outcome="稍后再聊", delivery="日程或聊天已有更新，重新核对约定")
+                return
+            if not Wallet(self.store).current_notice(row, now):
+                row.update(outcome="稍后再聊", delivery="这笔生活费的情况已经更新")
                 return
             stage = "发送失败"
             result = await self.ctx.send.text(text, session, return_details=True,
