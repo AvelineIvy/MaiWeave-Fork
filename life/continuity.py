@@ -349,6 +349,11 @@ class Continuity:
     def plan_promise(self, value, session, now, spoken=""):
         plan = self.engine.owned("plan", value.plan_id, session)
         ref = f"plan:{plan['id']}:{value.when}"
+        scene = plan.get("shift_scene") or {}
+        if value.when == "task_completion":
+            if not scene:
+                return
+            ref += ":" + scene["started_at"]
         old = next((r for r in self.engine.store.all("thread") if r["session_id"] == session and r["source_ref"] == ref), None)
         if value.action == "answered":
             if old and old["status"] == "open" and (not spoken or self.engine.time(spoken) >= self.engine.time(old.get("promised_at") or old["created_at"])):
@@ -360,15 +365,29 @@ class Continuity:
         if due + timedelta(days=1) <= now and plan["status"] == "completed":
             return
         title = f"到{plan['location']}后报信" if value.when == "arrival" else f"完成「{plan['title']}」后报信"
+        if value.when == "task_completion":
+            title = f"做完「{scene['task']}」后接着聊"
         thread = self.save_thread(title, value.evidence, session, max(due, now).isoformat(), now, source_ref=ref)
+        if value.when == "task_completion":
+            thread["task_started_at"] = scene["started_at"]
+        thread["topic"] = value.topic
         thread.update(plan_id=plan["id"], when=value.when, destination=plan["location"], promised_at=spoken or now.isoformat())
         with self.engine.store.db:
             self.engine.store.put("thread", thread)
 
     def promise_time(self, plan, when):
+        if when == "task_completion" and (plan.get("shift_scene") or {}).get("finished_at"):
+            return self.engine.time(plan["shift_scene"]["finished_at"])
+        if when == "completion" and plan.get("experience_id"):
+            experience = self.engine.store.find("experience", plan["experience_id"])
+            if experience:
+                return self.engine.time(experience["occurred_at"])
         return self.engine.time(plan["start"] if when == "arrival" and plan["kind"] != "travel" else plan["end"])
 
     def promise_ready(self, thread, plan):
+        if thread["when"] == "task_completion":
+            scene = plan.get("shift_scene") or {}
+            return scene.get("started_at") == thread["task_started_at"] and bool(scene.get("done"))
         if thread["when"] == "arrival" and plan["kind"] != "travel":
             if trip := self.engine.store.find("plan", plan.get("travel_id", "")):
                 return trip["status"] == "completed"
@@ -389,7 +408,11 @@ class Continuity:
             for record in self.engine.store.all("thread"):
                 if record.get("plan_id") and record["status"] == "open":
                     plan = self.engine.store.find("plan", record["plan_id"])
-                    if not plan or plan["status"] == "cancelled" or (record["when"] == "arrival" and plan["location"] != record["destination"]):
+                    scene = (plan or {}).get("shift_scene") or {}
+                    replaced = record["when"] == "task_completion" and (
+                        scene.get("started_at") != record["task_started_at"]
+                        or (plan["status"] == "completed" and not scene.get("done")))
+                    if replaced or not plan or plan["status"] == "cancelled" or (record["when"] == "arrival" and plan["location"] != record["destination"]):
                         record.update(status="resolved", resolved_at=now.isoformat())
                         self.engine.store.put("thread", record)
                         continue

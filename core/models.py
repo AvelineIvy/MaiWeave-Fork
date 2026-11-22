@@ -179,7 +179,8 @@ class ChatArrangement(BaseModel):
 
 class PlanPromise(BaseModel):
     plan_id: str
-    when: Literal["arrival", "completion"]
+    when: Literal["arrival", "completion", "task_completion"]
+    topic: str = Field(default="", max_length=200)
     action: Literal["promise", "answered"]
     evidence: str = Field(min_length=1, max_length=500)
 

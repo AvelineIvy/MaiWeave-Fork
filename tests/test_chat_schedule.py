@@ -38,6 +38,52 @@ async def test_promise_follows_rescheduled_activity(plugin, monkeypatch, when):
     assert p.store.get("thread", thread["id"])["status"] == "resolved"
 
 
+async def test_class_finishes_before_scheduled_end(plugin):
+    from maiweave.core.models import ExperienceInput, PlanPromise
+    p = plugin
+    now = p.now()
+    plan = p.engine.create_plan(PlanInput(title="讨论课", kind="study", start=now.isoformat(),
+        end=(now + timedelta(hours=1)).isoformat()), "", now)
+    value = PlanPromise(plan_id=plan["id"], when="completion", action="promise", evidence="下课再讲")
+    p.continuity.plan_promise(value, "chat-a", now)
+    at = now + timedelta(minutes=40)
+    p.engine.record_experience(ExperienceInput(summary="提前下课", occurred_at=at.isoformat(),
+        source="reported", evidence="今天提前下课了", plan_id=plan["id"]), "", at)
+    p.continuity.expire_threads(at)
+    thread, = p.store.all("thread")
+    assert thread["due_at"] == at.isoformat() and p.continuity.can_report(thread)
+
+
+async def test_promise_follows_the_task_inside_a_shift(plugin):
+    from maiweave.core.models import PlanPromise
+    p = plugin
+    now = p.now()
+    plan = p.engine.create_plan(PlanInput(title="审稿", kind="work", start=now.isoformat(),
+        end=(now + timedelta(hours=1)).isoformat()), "", now)
+    scene = {"task": "核对引文", "started_at": now.isoformat(), "done": False}
+    plan["shift_scene"] = scene
+    with p.store.db:
+        p.store.put("plan", plan)
+    value = PlanPromise(plan_id=plan["id"], when="task_completion", action="promise",
+                        evidence="核完这条引文就回你", topic="用哪种纸折船好？")
+    p.continuity.plan_promise(value, "chat-a", now)
+    thread, = p.store.all("thread")
+    assert not p.continuity.can_report(thread)
+    at = now + timedelta(minutes=3)
+    scene.update(done=True, finished_at=at.isoformat())
+    with p.store.db:
+        p.store.put("plan", plan)
+    p.continuity.expire_threads(at)
+    thread = p.store.get("thread", thread["id"])
+    assert thread["due_at"] == at.isoformat() and p.continuity.can_report(thread)
+    assert thread["topic"] == value.topic
+    scene["started_at"] = at.isoformat()
+    with p.store.db:
+        p.store.put("plan", plan)
+    p.continuity.expire_threads(at)
+    assert p.store.get("thread", thread["id"])["status"] == "resolved"
+
+
 async def test_cancelled_promise_silences_queued_planner(plugin, monkeypatch):
     from maiweave.core.models import PlanPromise
     p = plugin

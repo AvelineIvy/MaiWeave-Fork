@@ -1073,9 +1073,14 @@ class Living:
                         if self.continuity.can_report(item):
                             plan = engine.store.get("plan", item["plan_id"])
                             milestone = "已经抵达" if item["when"] == "arrival" else "已经完成"
-                            intent = (f"你对这个聊天的原话是「{item['context']}」。请用一句话兑现这次报信。"
+                            if item["when"] == "task_completion":
+                                scene = plan["shift_scene"]
+                                milestone = f"{scene['task']}已做完：{scene['resolution']}"
+                            topic = item.get("topic")
+                            resume = f"接着回答当时聊的「{topic}」。" if topic else "请用一句话兑现这次报信。"
+                            intent = (f"你对这个聊天的原话是「{item['context']}」。{resume}"
                                       f"本次进展：{milestone}；地点：{plan['location']}；日程：{plan['title']}；"
-                                      f"对应时间：{item['due_at']}。本次只说这项进展，当前活动和以往聊天按各自时间区分。")
+                                      f"对应时间：{item['due_at']}。")
                             notices.insert(0, (self.thread_key(item), intent, item))
                         continue
                     notices.append((self.thread_key(item), f"接续此前的话题：{item['title']}。已有上下文：{item['context']}。结合最近聊天跟进仍待解决的部分；已经解决时结束该话题。", item))
@@ -1084,7 +1089,7 @@ class Living:
                     notices.append((f"issue:{item['id']}:{item['reason']}", f"安排需要调整：{item['title']}。原因：{item['reason']}。说明当前待调整的状态。", None))
             notices = [n for n in notices if n[0] not in sent.get("notice_ids", []) and self.share_ready(n[0], session, now)]
             if pause:
-                notices = [n for n in notices if n[2] and n[2].get("when") == "arrival" and ordinary_hours
+                notices = [n for n in notices if n[2] and n[2].get("when") in {"arrival", "task_completion"} and ordinary_hours
                            and n[2].get("plan_id") == current["id"]]
                 if not notices:
                     record("跳过", pause["message"], session)

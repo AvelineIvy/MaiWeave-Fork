@@ -130,6 +130,7 @@ class ChatSchedule:
             linked = [r for r in p.store.all("thread") if r["session_id"] == session and r.get("plan_id") and r["status"] == "open"]
             recent = [r for r in visible if r["status"] == "completed" and p.engine.time(r["end"]) >= p.engine.time(messages[-1]["时间"])][-4:]
             candidates = {r["id"] for r in plans + recent} | {r["plan_id"] for r in linked}
+            tasks = {r["id"]: r["shift_scene"]["task"] for r in visible if r["id"] in candidates and r.get("shift_scene")}
             prompt = (
                 "提取聊天中已经确定、会影响角色本人日程的临时安排，输出JSON对象arrangements数组。"
                 "结合双方发言判断事情属于谁；用户自己的调休、请假记录在用户近况，arrangements填空数组。"
@@ -144,10 +145,13 @@ class ChatSchedule:
                 "约定变更用原record_id更新内容及时间，取消限制时blocked_kinds填空数组。"
                 f"现在：{now.isoformat()}；已有事项：{json.dumps(self.context(now, session), ensure_ascii=False)}；"
                 "另输出promises数组。角色亲口答应到达某地后报信、或做完某项日程后告诉对方时，按目的地或事项匹配plan_id。"
-                "每项填plan_id、when（到达arrival，做完completion）、action（答应promise，已经告诉对方结果answered）、evidence（逐字引用角色消息）。"
+                "每项填plan_id、when（到达arrival，整段日程结束completion，手头任务完成task_completion）、action（答应promise，已经回答answered）、evidence（逐字引用角色消息）。"
+                "下课再讲属于completion；核完引文就回你属于对应手头任务的task_completion。topic摘录要接着聊的问题，最多200字；只约好报信时留空。"
+                "对方先问且麦麦已回答原话题时填answered。只说还在忙时保留约定。"
+                f"日程中的具体任务：{tasks}。"
                 "例如去图书馆途中说‘到了再跟你说’，关联图书馆活动的arrival。对方追问还不算答复，麦麦说‘到啦’才算。"
                 "单纯计划或泛泛道别无需报信。同一段对话已经报过时也提取answered。与报信有关的内容放promises。"
-                f"近期完成：{[(r['id'], r['title'], r['location']) for r in recent]}；待报信：{[(r['plan_id'], r['when'], r['context']) for r in linked]}；"
+                f"近期完成：{[(r['id'], r['title'], r['location']) for r in recent]}；待报信：{[(r['plan_id'], r['when'], r['context'], r.get('topic','')) for r in linked]}；"
                 f"可调整日程：{json.dumps(plans, ensure_ascii=False)}；最近聊天（按先后）：{json.dumps(list(reversed(messages)), ensure_ascii=False)}"
             )
             def validate(result):
