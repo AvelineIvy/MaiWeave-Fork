@@ -87,13 +87,15 @@ async def test_autonomous_activity_searches_and_schedules_its_venue(plugin, acti
         {"title": name, "url": "https://example.org/venue", "snippet": "大庆的" + category}]}))
     plugin.ctx.llm.generate.side_effect = [
         {"success": True, "response": json.dumps({"title": activity, "kind": kind, "minutes": 40,
-            "location": "", "motivation": "想换个地方活动", "place_query": activity})},
+            "location": "", "motivation": "想换个地方活动", "place_query": activity, "cost": 22 if kind == "meal" else 0})},
         {"success": True, "response": json.dumps({"places": [{"name": name, "category": category,
             "outdoor": False, "description": "适合本次活动", "source_index": 0}]})},
     ]
     await plugin.living.choose_activity(plugin.now())
     plan = next(p for p in plugin.store.all("plan") if p["kind"] != "travel")
     assert plan["location"] == name and plan["autonomous"] and plan["kind"] == kind
+    if kind == "meal":
+        assert plan["food"] == "外食" and plan["cost"] == 22
     trip = plugin.store.get("plan", plan["travel_id"])
     assert trip["route"]["destination"] == name
     assert plugin.engine.time(trip["end"]) == plugin.engine.time(plan["start"])

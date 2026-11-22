@@ -542,6 +542,9 @@ class WebUI:
         weather = self.world.context(now)["weather"]
         weather_brief = None if not weather else {"city": weather["city"], "label": weather["label"],
             "temperature": weather["current"]["temperature_2m"], "stale": weather["stale"], "at": display_time(weather["observed_at"])}
+        if weather_brief:
+            weather_brief["forecast"] = [day for day in weather.get("forecast", [])
+                                         if now.date().isoformat() <= day["day"] <= (now.date() + timedelta(days=2)).isoformat()]
         pointer = self.store.find("runtime", "current_book")
         book = self.store.find("book", pointer["book_id"]) if pointer else None
         notes = self.books.notes(book["id"])["items"] if book else []

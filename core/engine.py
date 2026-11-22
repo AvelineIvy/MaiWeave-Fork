@@ -45,7 +45,7 @@ def work_now(plan, now):
 def public_plan(plan):
     scene = plan.get("shift_scene")
     if scene and not scene["done"]:
-        return {**plan, "shift_scene": {k: v for k, v in scene.items() if k not in {"resolution", "next_shift"}}}
+        return {**plan, "shift_scene": {k: v for k, v in scene.items() if k not in {"resolution", "next_shift", "payoff"}}}
     return plan
 
 
@@ -519,9 +519,9 @@ class LifeEngine:
                         if seconds >= remaining:
                             scene["done"] = True
                             scene["finished_at"] = right.isoformat()
-                            if scene["relief"]:
-                                state["stress"] = bounded(state["stress"] - scene["relief"])
-                                state["mood"] = bounded(state["mood"] + 2, -100, 100)
+                            mood, relief = {"有成就感": (3, 1), "有人搭手": (2, 3)}.get(scene.get("payoff"), (0, 0))
+                            state["stress"] = bounded(state["stress"] - max(scene["relief"], relief))
+                            state["mood"] = bounded(state["mood"] + max(2 if scene["relief"] else 0, mood), -100, 100)
                     if current["elapsed_seconds"] == 0:
                         current["elapsed_days"] = {}
                     if "elapsed_days" in current:

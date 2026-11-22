@@ -44,6 +44,7 @@ class ShiftScene(BaseModel):
     minutes: int = Field(ge=1)
     deadline_minutes: int | None = Field(default=None, ge=1, le=1440)
     resolution: str = Field(min_length=1, max_length=100)
+    payoff: Literal["平常", "有成就感", "有人搭手"] = "平常"
     next_shift: str = Field(default="", max_length=120)
 
 

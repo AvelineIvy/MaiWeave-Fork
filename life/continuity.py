@@ -97,6 +97,7 @@ class Continuity:
             "detail写手头进度。遇到人为难写对方的身份、原要求和具体举动；熟人沿用已有经历。"
             "minutes是做完这件小事所需分钟数；明确有人约定交付时间才填deadline_minutes（距现在几分钟）。"
             "resolution写这件事最后怎样收尾，可以是有人帮忙、顺利完成或改约交付。"
+            "payoff按实际收尾选：普通完成填平常；解决了难题、看见成果且确实高兴填有成就感；有人分担了具体工作填有人搭手。把缘由写在resolution里。"
             f"日常身份={(store.find('runtime', 'occupation') or {}).get('name', self.config.life.occupation or '未设定')}；"
             f"班次={plan['title']}，地点={plan['location']}，缘由={plan['motivation']}，"
             f"地点说明={place.get('description', '')[:120]}；现在={now:%H:%M}，剩余{available}分钟；{background}；"

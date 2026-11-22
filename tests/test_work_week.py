@@ -159,6 +159,30 @@ async def test_shift_context_and_settlement(plugin, monkeypatch, situation):
     assert p.store.get("experience", completed["experience_id"])["details"]["事情的收尾"] == scene.resolution
 
 
+@pytest.mark.parametrize(("payoff", "mood", "relief"), [("平常", 0, 0), ("有成就感", 3, 1), ("有人搭手", 2, 3)])
+async def test_work_payoff_on_completion(plugin, monkeypatch, payoff, mood, relief):
+    engine = plugin.engine
+    start = engine.time(engine.state()["updated_at"])
+    end = start + timedelta(hours=1)
+    plan = engine.create_plan(PlanInput(kind="work", title="图书上架", start=start.isoformat(), end=end.isoformat()), "", start)
+    now = start + timedelta(minutes=1)
+    engine.advance(now)
+    with plugin.store.db:
+        plugin.store.put("state", {**engine.state(), "stress": 18, "mood": 10})
+    scene = ShiftScene(task="整理新书", situation="日常", detail="还有一架", resolution="书架整理好了", minutes=10, payoff=payoff)
+    monkeypatch.setattr(plugin.continuity, "ask", AsyncMock(return_value=scene))
+    await plugin.continuity.start_shift(plugin.store.get("plan", plan["id"]), now)
+    assert "payoff" not in engine.snapshot("", now)["current"]["shift_scene"]
+    expected = engine.state()
+    engine._evolve(expected, 10 / 60, "work")
+    at = now + timedelta(minutes=10)
+    state = engine.advance(at)
+    assert state["energy"] == pytest.approx(expected["energy"], abs=.002)
+    assert state["stress"] == pytest.approx(expected["stress"] - relief, abs=.002)
+    assert state["mood"] == pytest.approx(expected["mood"] + mood, abs=.002)
+    assert engine.advance(at) == state
+
+
 def test_paid_shift_changed_to_rest(plugin):
     p = plugin
     now = p.now()

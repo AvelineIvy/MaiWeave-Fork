@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from maiweave.core.engine import LifeEngine
-from maiweave.core.models import ExperienceInput
+from maiweave.core.models import ActivityChoice, ExperienceInput, PlanInput
 from test_plugin import plugin
 from test_proactive_modes import prepare
 
@@ -239,6 +239,36 @@ async def test_two_lenders_repaid_in_deposit_order(plugin):
     with store.db:
         w.settle({**shift, "id": "第二班", "pay": 13}, now + timedelta(hours=3))
     assert not w.current_notice(progress, now)
+
+
+async def test_lunch_before_returning_to_work(plugin, monkeypatch):
+    p = plugin
+    now = p.now().replace(hour=12, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    p.config.life.autonomous = True
+    with p.store.db:
+        p.store.put("state", {**p.engine.state(), "location": "图书馆", "updated_at": now.isoformat()})
+        p.store.put("runtime", {"id": "pantry", "raw": 0, "ready": 1})
+    p.engine.create_plan(PlanInput(title="午间值班", kind="work", location="图书馆",
+                                   start=(now + timedelta(minutes=30)).isoformat(),
+                                   end=(now + timedelta(hours=3)).isoformat()), "", now)
+
+    async def choose(ctx, store, config, feature, prompt, model, validate):
+        choice = ActivityChoice(title="吃午饭", kind="meal", minutes=20, motivation="午休吃饭",
+                                location="图书馆", food="吃留餐")
+        with pytest.raises(ValueError, match="冰箱在家里"):
+            validate(choice)
+        with pytest.raises(ValueError, match="往返路程"):
+            validate(choice.model_copy(update={"location": "住处"}))
+        meal = choice.model_copy(update={"food": "外食", "cost": 15, "title": "在馆里吃外卖"})
+        validate(meal)
+        return meal
+
+    monkeypatch.setattr("maiweave.life.living.generate", choose)
+    await p.living.choose_activity(now)
+    meal, = [plan for plan in p.store.all("plan") if plan["kind"] == "meal"]
+    p.engine.advance(p.engine.time(meal["end"]))
+    assert p.engine.wallet.pantry()["ready"] == 1
+    assert p.engine.wallet.account()["balance"] == p.config.life.opening_balance - 15
 
 
 async def test_paid_opportunity_uses_saved_place_and_experience(plugin, monkeypatch):

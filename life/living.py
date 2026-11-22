@@ -590,12 +590,20 @@ class Living:
                            "news": [select_fields(r, ("title", "published_at")) for r in environment["news"]],
                            "readings": [brief(select_fields(r, ("title", "content")), 160, 2) for r in environment["readings"]]}
             available_places = {p["name"]: p for p in self.world.planning_places()}
+            shifts = [p for p in engine.plans("", now.isoformat(), (now + timedelta(hours=36)).isoformat()) if p["status"] == "scheduled" and
+                      (p["kind"] == "work" or p["kind"] == "study" and p.get("routine_id"))
+                      and now < engine.time(p["start"])]
+            shift_times = [(p["start"][:16], p["end"][11:16], p["location"]) for p in shifts[:4]]
+            until_shift = int((engine.time(shifts[0]["start"]) - now).total_seconds() / 60) if shifts else 0
+            to_shift = {r["destination"]: r["minutes"] for r in self.spatial.routes_from(shifts[0]["location"])} if shifts and shifts[0]["location"] and until_shift <= 180 else {}
             places = []
             for route in self.spatial.routes_from(state["location"]):
                 place = available_places.get(route["destination"])
                 if place:
                     entry = select_fields(place, ("name", "category"))
                     entry["路程分钟"] = route["minutes"]
+                    if route["destination"] in to_shift:
+                        entry["到下一班前可停留分钟"] = max(0, until_shift - route["minutes"] - to_shift[route["destination"]])
                     fare = sum(leg.get("fare", 0) for leg in route["legs"])
                     if fare:
                         entry["车费"] = fare
@@ -633,6 +641,8 @@ class Living:
                 f"本周的钱：{spending_room}，单位为{wallet.currency_name}。余款少时多用现有食材和物品。"
                 "余款宽裕时，结合口味、兴趣和手头的事决定要不要点道喜欢的菜、添点材料；没有想买的就把钱存着。"
                 f"家里的生食材够{pantry['raw']}餐，做好待吃的有{pantry['ready']}餐。"
+                f"接下来班次或课的起止和地点：{shift_times}。两班之间是空档，先扣往返路程再看够不够吃饭。"
+                "留餐在家里，要回家才能取用。时间紧就选赶得上的餐食；明早有安排，今晚做饭时也可以顺手备下一餐。"
                 f"最近几顿按从近到远：{meals}。最近两次买菜：{groceries_bought}。"
                 "买菜前想想接下来想做哪道菜；连着吃了几顿相似的，结合口味和余粮选今天想吃的。"
                 "外食按想吃的东西、店里供应什么、路程和下一项安排选地方；赶时间可以买现成的，有空可以坐下点餐。"
@@ -676,6 +686,11 @@ class Living:
             )
             def validate_activity(choice):
                 choice.food = wallet.food_action(choice)
+                if choice.food in {"吃留餐", "现做现吃", "做好留餐"}:
+                    home_places = {p["name"] for p in engine.store.all("place") if p["id"] in {"home", "bedroom", "kitchen"}}
+                    if choice.place_query or (choice.location or state["location"]) not in home_places:
+                        raise ValueError("冰箱在家里。用家里的食材或留餐请选择住处或厨房，在外就餐选外食或有依据的受招待。")
+                destination = choice.location or state["location"]
                 if (not choice.book_id and not choice.research_query and books and choice.kind in {"study", "leisure"}
                         and self.reading_title(choice.title)):
                     named = max((b for b in books if b["title"] in choice.title), key=lambda b: len(b["title"]), default=None)
@@ -693,6 +708,8 @@ class Living:
                     if offer.get("hourly_pay") and (choice.kind != "work" or choice.location != offer["location"] or choice.place_query):
                         raise ValueError("接这份零工时请选择工作类型和机会里已有的地点")
                 travel = self.spatial.route(state["location"], choice.location)["minutes"] if choice.location else 0
+                if choice.kind in {"cook", "meal"} and destination in to_shift and until_shift - travel - to_shift[destination] < 10:
+                    raise ValueError("扣除往返路程后不足十分钟，请在当前地点或上班途中选择赶得上的用餐地点。")
                 start = now + timedelta(minutes=travel)
                 end = start + timedelta(minutes=min(choice.minutes, free))
                 for row in engine.store.all("chat_arrangement"):
