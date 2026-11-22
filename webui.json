@@ -25,6 +25,19 @@
             }
           }
         },
+        "avatar": {
+          "api": "ui_map_avatar",
+          "version": "1",
+          "parameters": {}
+        },
+        "route": {
+          "api": "ui_map_route",
+          "version": "1",
+          "parameters": {
+            "origin": {"type": "string", "required": true},
+            "destination": {"type": "string", "required": true}
+          }
+        },
         "timeline": {
           "api": "ui_life_timeline",
           "version": "1",

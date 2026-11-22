@@ -1,14 +1,19 @@
 """MaiBot 原生工作区页面的数据和操作接口。"""
 
 import asyncio
+import base64
+from io import BytesIO
+from urllib.request import urlopen
+from PIL import Image
 import json
 import math
-from time import monotonic
+from time import monotonic, time
 from datetime import date, timedelta
 from .review import Assessment
 
 from maibot_sdk import API
 
+from ..core.engine import travel_position
 from ..core.models import GoalInput, PlanInput, PlanPatch, RoutineInput
 from ..integrations.usage import summary as usage_summary
 
@@ -47,6 +52,8 @@ def plan_row(plan):
 
 
 class WebUI:
+    _map_avatar_cache = None
+
     @API("ui_character_image", description="查看共用角色参考图")
     async def ui_character_image(self) -> dict:
         images = self.diary_publisher.images
@@ -764,28 +771,91 @@ class WebUI:
             self.store.delete(category, record_id)
         return {"message": "所选资料已删除"}
 
+    @API("ui_map_avatar", description="读取当前 QQ 账号的地图头像")
+    async def ui_map_avatar(self) -> dict:
+        account = await self.ctx.call_capability("api.call", api_name="adapter.napcat.system.get_login_info", version="1", timeout_ms=5000, args={})
+        if not account or not account.get("user_id"):
+            return {"image": ""}
+        account_id = str(account["user_id"])
+        avatar = await self.ctx.chat.get_avatar("qq", account_id, account_id=account_id)
+        if avatar["status"] != "available":
+            return {"image": ""}
+        key = (account_id, avatar["url"])
+        if self._map_avatar_cache:
+            saved_key, expires, image = self._map_avatar_cache
+            if key == saved_key and time() < expires:
+                return {"image": image}
+
+        def thumbnail():
+            with urlopen(avatar["url"], timeout=8) as response, Image.open(BytesIO(response.read())) as image:
+                image.thumbnail((96, 96))
+                output = BytesIO()
+                image.convert("RGB").save(output, "JPEG", quality=85)
+                return "data:image/jpeg;base64," + base64.b64encode(output.getvalue()).decode()
+
+        image = await asyncio.to_thread(thumbnail)
+        self._map_avatar_cache = (key, avatar["expires_at"], image)
+        return {"image": image}
+
+    @API("ui_map_route", description="查询两个生活地点间的分段路线")
+    async def ui_map_route(self, origin: str, destination: str) -> dict:
+        return self.spatial.route(origin, destination)
+
     @API("ui_space", description="地点、路线及移动进度")
     async def ui_space(self) -> dict:
         plans = sorted(self.store.all("plan", omit=("changes",)), key=lambda p: self.engine.time(p["start"]))
         return {**self.life_map(plans), **self.wallet_summary()}
 
     def wallet_summary(self):
-        return {"currency_name": self.engine.wallet.currency_name, "wallet": self.engine.wallet.account(),
+        loans = self.store.all("money_request")[-10:]
+        for loan in loans:
+            if loan["status"] == "待询问" and loan["session"]:
+                sent = self.store.find("sharing", loan["session"]) or {}
+                if "wallet:" + loan["id"] in sent.get("notice_ids", []):
+                    loan["status"] = "等对方回复"
+        return {"currency_name": self.engine.wallet.currency_name, "wallet": self.engine.wallet.account(), "rent": self.engine.wallet.rent_note(),
                 "payments": self.store.page("payment", size=20, time_field="at")["items"],
-                "loans": self.store.all("money_request")[-10:]}
+                "loans": loans}
 
     def life_map(self, plans):
         places = self.store.all("place")
         names = {p["id"]: p["name"] for p in places}
-        current = self.engine.current(self.now())
+        now = self.now()
+        current = self.engine.current(now)
         route = current.get("route") if current else None
+        state = self.engine.state()
+        updated = self.engine.time(state["updated_at"])
+        location = state["location"]
+        if route:
+            # 地图按查看时刻补上两次生活更新之间走过的路程。
+            since = max(updated, self.engine.time(current["start"]))
+            elapsed = current["elapsed_seconds"] + max(0, (now - since).total_seconds())
+            journey = travel_position({**current, "elapsed_seconds": elapsed})
+            journey["remaining_minutes"] = max(0, math.ceil(route["minutes"] - elapsed / 60))
+        else:
+            arrived = next((p for p in reversed(plans) if p.get("route") and p["status"] in {"scheduled", "active"}
+                            and updated < self.engine.time(p["end"]) <= now), None)
+            if arrived:
+                location = arrived["route"]["destination"]
+            journey = {"location": location, "next": "", "progress": 100, "mode": "停留", "destination": ""}
+        location = journey["location"]
         upcoming = next((p for p in plans if p["status"] == "scheduled" and not p.get("activity_id")
                          and self.engine.time(p["start"]) >= self.now()), None)
-        return {"location": self.engine.state()["location"], "places": [{**p, "outdoor_label": "室外" if p["outdoor"] else "室内"} for p in places],
+        stop = None
+        if upcoming:
+            stop = {"location": upcoming["location"], "at": upcoming["start"], "title": upcoming["title"]}
+            if not route and upcoming["location"] and upcoming["location"] != location:
+                departure = upcoming if upcoming.get("route") else next((p for p in plans if p.get("activity_id") == upcoming["id"] and p["status"] == "scheduled" and p.get("route")), None)
+                if departure and departure["route"]["origin"] == location:
+                    stop.update(route=departure["route"], departure=departure["start"])
+                else:
+                    try:
+                        stop["route"] = self.spatial.route(location, upcoming["location"])
+                    except ValueError as error:
+                        stop["route_message"] = str(error)
+        return {"location": location, "places": [{**p, "outdoor_label": "室外" if p["outdoor"] else "室内"} for p in places],
                 "routes": [{**r, "origin_name": names[r["origin"]], "destination_name": names[r["destination"]]} for r in self.store.all("route")],
-                "journey": self.engine.state().get("journey") or {"location": self.engine.state()["location"], "next": "", "progress": 100, "mode": "停留", "destination": ""},
-                "legs": route["legs"] if route else [], "next_stop": {
-                    "location": upcoming["location"], "at": upcoming["start"]} if upcoming else None,
+                "journey": journey, "legs": route["legs"] if route else [], "next_stop": stop,
                 "visits": [{"location": p["location"], "title": p["title"], "at": p["end"]} for p in
                            sorted(plans, key=lambda p: self.engine.time(p["end"])) if p["status"] == "completed" and p["kind"] != "travel"][-40:],
                 "shifts": [{"location": p["location"], "title": p["title"], "at": p["start"], "pay": p.get("pay", 0)}

@@ -117,7 +117,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
             ("profile", "life", "角色设定", "时区已有默认值，背景和兴趣按需补充。", ["timezone", "interests", "background"]),
             ("sleep", "life", "日常作息", "关闭作息可全天候交流；开启后按 24 小时制安排睡眠。", ["schedule_enabled", "nap_quiet", "sleep_skip_private_planner", "sleep_hour", "wake_hour"]),
             ("wake", "life", "睡眠唤醒", "设置私聊唤醒概率、唤醒词语和醒来后留给聊天的时间。", ["wake_enabled", "private_wake_probability", "wake_minutes", "wake_keywords"]),
-            ("economy", "life", "经济设置", "设置麦麦开始生活时的存款。", ["opening_balance", "currency_name"]),
+            ("economy", "life", "经济设置", "设置麦麦的存款、货币和房租。", ["opening_balance", "currency_name", "monthly_rent", "rent_day"]),
             ("planning", "life", "更新与规划", "设置生活推进和自主规划的检查间隔。", ["tick_seconds", "planning_interval_minutes"]),
             ("weather", "world", "实时天气", "填写城市，查看当地天气和预报。", ["weather_enabled", "weather_provider", "weather_api_key", "city", "country_code"]),
             ("explore", "world", "自主见闻", "安排时间了解感兴趣的事，再把发现带回生活。", ["explore_enabled", "explore_topics", "explore_daily_limit", "explore_interval_minutes"]),
@@ -211,6 +211,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         wallet.currency_name = self.config.life.currency_name.strip()
         if wallet.account()["opening"] != self.config.life.opening_balance and not self.store.count("payment"):
             wallet.set_opening(self.config.life.opening_balance)
+        wallet.configure_rent(self.config.life.monthly_rent, self.config.life.rent_day, self.now())
         self.retention = Retention(self.store, self.config, self.ctx.paths.data_dir)
         self.spatial = Spatial(self.engine)
         self.world = World(self.engine, self.ctx, self.config)

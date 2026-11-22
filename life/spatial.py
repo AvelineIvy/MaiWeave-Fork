@@ -28,6 +28,20 @@ class Spatial:
                 elif state["location"] not in {p["name"] for p in store.all("place")}:
                     store.put("place", {"id": uid(), "name": state["location"], "outdoor": False, "description": "从已有生活状态保留的地点，请补充环境与路线"})
 
+        if not store.find("runtime", "neighborhood_shop"):
+            with store.db:
+                places = store.all("place")
+                shop = next((p for p in places if "便利店" in p["name"] or "便利商店" in p["name"]), None)
+                if not shop:
+                    shop = store.put("place", {"id": uid(), "name": "楼下便利店", "outdoor": False,
+                                               "description": "住宅街口的小店，可以买早餐、补日用品，也可以顺路取快递。"})
+                if any(p["id"] == "street" for p in places) and not any(
+                    shop["id"] in (r["origin"], r["destination"]) for r in store.all("route")
+                ):
+                    store.put("route", {"id": "street:" + shop["id"], "origin": "street", "destination": shop["id"],
+                                        "minutes": 2, "mode": "步行", "fare": 0})
+                store.put("runtime", {"id": "neighborhood_shop", "place_id": shop["id"]})
+
     def place(self, name: str) -> dict:
         place = next((p for p in self.engine.store.all("place") if name in {p["id"], p["name"]}), None)
         if place is None:

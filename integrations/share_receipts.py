@@ -109,16 +109,19 @@ class ShareReceipts:
             self.store.put("share_receipt", row)
         stage = "生成失败"
         try:
-            context = await self.recent_chat(session)
-            result = await self.ctx.maisaka.reply.generate(
-                session, intent + "\n最近聊天：" + json.dumps(context, ensure_ascii=False),
-                format_instruction="以角色自己的口吻，只围绕本次选定的一件事简短表达，通常一小段。最近聊天和其他生活资料用于承接话题，具体表达沿用角色习惯。区分过去经历与此刻活动，直接输出可发送的正文。",
-                timeout_ms=95000)
-            if not result["success"]:
-                raise RuntimeError(result.get("error") or "回复生成失败")
-            text = result["text"].strip()
-            if not text:
-                raise RuntimeError("回复生成结果为空")
+            if row["record_id"].startswith("wallet:"):
+                text = row["topic"]
+            else:
+                context = await self.recent_chat(session)
+                result = await self.ctx.maisaka.reply.generate(
+                    session, intent + "\n最近聊天：" + json.dumps(context, ensure_ascii=False),
+                    format_instruction="以角色自己的口吻，只围绕本次选定的一件事简短表达，通常一小段。最近聊天和其他生活资料用于承接话题，具体表达沿用角色习惯。区分过去经历与此刻活动，直接输出可发送的正文。",
+                    timeout_ms=95000)
+                if not result["success"]:
+                    raise RuntimeError(result.get("error") or "回复生成失败")
+                text = result["text"].strip()
+                if not text:
+                    raise RuntimeError("回复生成结果为空")
             thread = self.store.find("thread", row["thread_id"]) if row.get("thread_id") else None
             if thread and thread.get("plan_id") and can_report and not can_report(thread):
                 row.update(outcome="稍后再聊", delivery="日程或聊天已有更新，重新核对约定")

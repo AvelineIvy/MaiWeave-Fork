@@ -5,10 +5,19 @@ import json
 import pytest
 from datetime import timedelta
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 from maiweave.config import MaiWeaveConfig
 from maiweave.plugin import create_plugin
 from test_plugin import plugin
+
+
+@pytest.mark.parametrize("status", ["unsupported", "missing"])
+async def test_map_uses_login_account_and_keeps_default_avatar(plugin, status):
+    plugin.ctx.call_capability = AsyncMock(return_value={"user_id": "test-account"})
+    plugin.ctx.chat.get_avatar = AsyncMock(return_value={"status": status, "url": None})
+    assert await plugin.ui_map_avatar() == {"image": ""}
+    plugin.ctx.chat.get_avatar.assert_awaited_once_with("qq", "test-account", account_id="test-account")
 
 
 async def test_energy_and_mood_share_sample_times(plugin):

@@ -16,6 +16,7 @@ from maiweave.life.rhythm import Rhythm, matches
 from maiweave.life.spatial import Spatial
 from maiweave.core.store import Store
 from maiweave.integrations.world import World, parse_feed
+from maiweave.interfaces.webui import WebUI
 
 
 @pytest.fixture
@@ -53,6 +54,53 @@ def test_route_progress_pause_resume_and_arrival(life):
     x.engine.advance(x.now + timedelta(minutes=42))
     assert x.engine.state()["location"] == "图书馆"
     assert x.store.get("plan", plan["id"])["status"] == "completed"
+
+
+def test_map_follows_scheduled_trip(life):
+    x = life
+    activity = x.spatial.schedule(PlanInput(title="去图书馆阅读", start=(x.now + timedelta(hours=1)).isoformat(),
+                                  end=(x.now + timedelta(hours=2)).isoformat(), location="图书馆"), "", x.now)
+    page = SimpleNamespace(engine=x.engine, spatial=x.spatial, store=x.store)
+
+    def at(minutes):
+        now = x.now + timedelta(minutes=minutes)
+        x.engine.advance(now)
+        page.now = lambda: now
+        return WebUI.life_map(page, sorted(x.store.all("plan"), key=lambda p: p["start"]))
+
+    before = at(0)
+    assert before["next_stop"]["at"] == activity["start"]
+    assert before["next_stop"]["departure"] == (x.now + timedelta(minutes=39)).isoformat()
+    assert before["next_stop"]["route"]["minutes"] == 21
+    assert before["location"] == "住处" and not before["journey"]["next"]
+    walking = at(40)
+    assert walking["journey"]["next"] == "楼下街道" and walking["journey"]["progress"] == 33
+    assert walking["journey"]["remaining_minutes"] == 20
+    page.now = lambda: x.now + timedelta(minutes=42)
+    on_transfer = WebUI.life_map(page, x.store.all("plan"))
+    assert on_transfer["journey"]["next"] == "图书馆" and on_transfer["journey"]["remaining_minutes"] == 18
+    assert x.engine.state()["location"] == "住处"
+    transfer = at(48)
+    assert transfer["location"] == "楼下街道" and transfer["journey"]["next"] == "图书馆"
+    assert transfer["journey"]["progress"] == 33
+    page.now = lambda: x.now + timedelta(minutes=60)
+    assert WebUI.life_map(page, x.store.all("plan"))["location"] == "图书馆"
+    arrived = at(61)
+    assert arrived["location"] == "图书馆" and not arrived["journey"]["next"]
+    assert not arrived["legs"] and not arrived["next_stop"]
+
+
+def test_neighborhood_shop_upgrade(life):
+    x = life
+    assert x.spatial.route("住处", "楼下便利店")["minutes"] == 5
+    shop = x.spatial.place("楼下便利店")
+    x.spatial.save_place("街角便利店", False, "原来的店", shop["id"])
+    x.spatial.save_route("street", shop["id"], 6, "步行")
+    with x.store.db:
+        x.store.delete("runtime", "neighborhood_shop")
+    upgraded = Spatial(x.engine)
+    assert upgraded.route("住处", "街角便利店")["minutes"] == 9
+    assert len([p for p in x.store.all("place") if "便利店" in p["name"]]) == 1
 
 
 def test_schedule_travel_change_cancel(life):

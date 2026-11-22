@@ -1,6 +1,6 @@
 """通过排班、生活推进和私聊工具核对角色收支。"""
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -8,6 +8,55 @@ from maiweave.core.engine import LifeEngine
 from maiweave.core.models import ExperienceInput
 from test_plugin import plugin
 from test_proactive_modes import prepare
+
+
+async def test_monthly_rent_loan_and_payday(plugin):
+    w, store = plugin.engine.wallet, plugin.store
+    now = datetime.fromisoformat("2028-01-31T09:00:00+08:00")
+    w.set_opening(45)
+    w.configure_rent(60, 31, now)
+    w.refresh(now)
+    assert w.account()["balance"] == 45 and "还差 15" in w.rent_note()
+    request, = w.pending(now)
+    assert w.planning_note(now) == "暂无"
+    w.notice(request, "private", "friend")
+    w.respond(request["id"], "private", "friend", "lend", now)
+    assert w.account()["balance"] == 0 and "2028-02-29" in w.rent_note()
+    assert store.get("money_request", request["id"])["owed"] == 15
+    w.refresh(now)
+    with store.db:
+        store.put("experience", {"id": "shift", "details": {}})
+        w.settle({"id": "shift", "title": "值班", "experience_id": "shift", "pay": 75}, now)
+    assert store.get("money_request", request["id"])["status"] == "已还清"
+    from maiweave.core.wallet import Wallet
+    resumed = Wallet(store)
+    later = now.replace(month=3)
+    resumed.configure_rent(60, 31, later)
+    resumed.refresh(later)
+    resumed.refresh(later)
+    assert resumed.account()["balance"] == 0
+    assert store.get("payment", "房租:2028-02")["amount"] == -60
+    assert "2028-03 房租待缴" in resumed.rent_note()
+    resumed.configure_rent(0, 1, later)
+    with store.db:
+        store.put("experience", {"id": "shift2", "details": {}})
+        resumed.settle({"id": "shift2", "title": "值班", "experience_id": "shift2", "pay": 70}, later)
+    resumed.refresh(later + timedelta(days=50))
+    assert resumed.account()["balance"] == 10 and resumed.rent_note() == ""
+    assert len([p for p in store.all("payment") if p["id"].startswith("房租:")]) == 3
+
+
+async def test_rent_starts_at_next_due_day(plugin):
+    w = plugin.engine.wallet
+    now = datetime.fromisoformat("2027-12-20T09:00:00+08:00")
+    w.configure_rent(30, 1, now)
+    w.refresh(now)
+    assert w.account()["balance"] == 100 and "2028-01-01" in w.rent_note()
+    jan = now.replace(year=2028, month=1, day=1)
+    w.refresh(jan)
+    w.configure_rent(40, 20, jan)
+    w.refresh(jan.replace(day=20))
+    assert w.account()["balance"] == 70 and "2028-02-20" in w.rent_note()
 
 
 async def test_shift_move_leave_and_settlement_after_restart(plugin, monkeypatch):
@@ -61,6 +110,11 @@ async def test_private_loan_to_wages_and_repayment(plugin, monkeypatch, mode):
     await p.living.share(now)
     row, = p.store.all("money_request")
     assert row["session"] == "chat-a" and row["amount"] == 8
+    if mode == "主动表达":
+        p.ctx.maisaka.reply.generate.assert_not_awaited()
+        assert p.ctx.send.text.await_args.args == ("买毛线还差8虚拟元，能借我一下吗？下次领了工钱就还你。", "chat-a")
+        assert p.wallet_summary()["loans"][0]["status"] == "等对方回复"
+        assert p.store.get("money_request", row["id"])["status"] == "待询问"
     assert [r["session"] for r in p.store.all("share_receipt") if r.get("record_id") == "wallet:"+row["id"]] == ["chat-a"]
     key = row["id"]
     async def respond(action, session="chat-a"):

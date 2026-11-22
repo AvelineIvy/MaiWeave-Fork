@@ -46,6 +46,7 @@
     "chat.open_session",
     "person.get_value",
     "chat.get_all_streams",
+    "chat.get_avatar",
     "message.get_by_time_in_chat",
     "person.get_id",
     "llm.get_available_models",
