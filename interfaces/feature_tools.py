@@ -157,7 +157,7 @@ class FeatureTools:
         self.require_life()
         self.engine.advance(self.now())
         if action == "map":
-            return await self.ui_space()
+            return self.life_map(self.engine.plans(kwargs["stream_id"]))
         if action == "route":
             return self.spatial.route(origin or self.engine.state()["location"], destination)
         if action == "move":

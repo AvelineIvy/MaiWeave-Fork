@@ -821,7 +821,7 @@ class WebUI:
         places = self.store.all("place")
         names = {p["id"]: p["name"] for p in places}
         now = self.now()
-        current = self.engine.current(now)
+        current = self.engine.current(now, plans)
         route = current.get("route") if current else None
         state = self.engine.state()
         updated = self.engine.time(state["updated_at"])

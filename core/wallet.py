@@ -115,6 +115,8 @@ class Wallet:
             batch = self.store.page("payment", page=page, size=20, time_field="at")
             for row in batch["items"]:
                 kind, _, source = row["id"].partition(":")
+                if kind in {"来款", "还款"} and not (session and user):
+                    continue
                 if "session" in row:
                     if row["session"] not in ("", session) or row.get("user") not in ("", user):
                         continue

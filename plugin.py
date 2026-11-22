@@ -481,7 +481,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         kwargs["extra_prompt"] += self.context_text(session, book_id, text, "回复")
         return {"action": "continue", "modified_kwargs": kwargs}
 
-    @Tool("maiweave_wallet", description="私聊查余额、购物花费、工钱和借款用list。payments是已经入账的收支，正数为收入、负数为支出。对方明确借出用lend、赠送用give、以后再给用promise、拒绝用decline。车费看list的commutes，按最晚出发时间判断能否赶上。用对应id办理，金额沿用差额。", parameters=schema({
+    @Tool("maiweave_wallet", description="查日常收支用list；私聊还能查余额和本次聊天的借还。payments是已经入账的收支，正数为收入、负数为支出。对方明确借出用lend、赠送用give、以后再给用promise、拒绝用decline。车费看list的commutes，按最晚出发时间判断能否赶上。用对应id办理，金额沿用差额。", parameters=schema({
         "action": {"type": "string", "enum": ["list", "lend", "give", "promise", "decline"]},
         "amount": {"type": "integer", "minimum": 0, "description": "明确给出的整数金额，省略表示申请金额"},
         "request_id": text_field("本次借款申请ID")}, ["action"]))
@@ -489,9 +489,12 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
     async def wallet_action(self, action: str, request_id: str = "", amount: int = 0, **kwargs):
         session, user = kwargs["stream_id"], kwargs["user_id"]
         await self.chat_context.identify(session)
-        if self.chat_context.kinds.get(session) != "private":
-            raise ValueError("请在私聊里处理虚拟钱包")
         wallet = self.engine.wallet
+        kind = self.chat_context.kinds.get(session)
+        if kind == "group" and action == "list":
+            return {"payments": wallet.recent_payments("", ""), "currency_name": wallet.currency_name}
+        if kind != "private":
+            raise ValueError("请在私聊里处理虚拟钱包")
         now = self.now()
         if request_id.startswith("通勤:"):
             self.spatial.reconcile(now)

@@ -335,3 +335,12 @@ async def test_private_wallet_lists_only_visible_posted_payments(plugin):
     assert [r["amount"] for r in result["content"]["payments"]] == [-90, 2, 60, -8]
     assert [r["amount"] for r in wallet.recent_payments("private", "别人")] == [-90, 60, -8]
     assert [r["title"] for r in wallet.recent_payments("another", "别人", 2)] == ["旧账房租", "私下送礼"]
+    p.ctx.chat.get_all_streams.return_value = [{"stream_id": "群", "is_group_session": True}]
+    group = (await p.wallet_action("list", stream_id="群", user_id="同伴"))["content"]
+    assert set(group) == {"payments", "currency_name"}
+    assert [r["amount"] for r in group["payments"]] == [-90, -8]
+    assert not (await p.wallet_action("lend", "借款", stream_id="群", user_id="同伴"))["success"]
+    assert {"wallet", "loans", "payments"}.isdisjoint(await p.space_tool("map", stream_id="群"))
+    p.config.context.group_mode = 1
+    context = p.chat_context.build("群", text="今天的收支流水呢？")
+    assert "旧账房租" in context and "早餐" in context and "借车费" not in context

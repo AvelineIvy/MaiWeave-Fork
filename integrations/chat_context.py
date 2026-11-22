@@ -23,7 +23,7 @@ LABELS = {"encounters": "群聊接话","life_images": "已展示图片","chat_ar
           "bookshelf": "阅读笔记", "profiles": "人物资料", "relationships": "人物关系",
           "anniversaries": "纪念日", "continuity": "生活接续", "goals": "目标",
           "experiences": "近期经历", "environment": "天气与资讯", "places": "地点",
-          "dreams": "梦境", "habits": "习惯"}
+          "dreams": "梦境", "habits": "习惯", "已入账收支": "已入账收支", "虚拟钱包": "虚拟钱包", "通勤车费": "通勤车费"}
 OMIT = {"history", "changes", "memory_id", "memory_revision", "payload", "material"}
 
 
@@ -109,7 +109,7 @@ class ChatContext:
     async def identify(self, session):
         if session not in self.kinds:
             streams = await self.plugin.ctx.chat.get_all_streams(platform="all_platforms")
-            self.kinds.update({s["stream_id"]: "group" if s.get("group_id") else "private" for s in streams})
+            self.kinds.update({s["stream_id"]: "group" if s.get("group_id") or s.get("is_group_session") else "private" for s in streams})
 
     def build(self, session, book_id="", text="", stage="Planner", *, followup_ids=None):
         p = self.plugin
@@ -161,7 +161,14 @@ class ChatContext:
         def add(key, value, relevant=False):
             if value:
                 candidates.append((0 if key == "pending_changes" else 1 if key == "bookshelf" and book_id else 2 if relevant else 3, key, value))
-        if not group:
+        private = self.kinds.get(session) == "private"
+        if any(w in text for w in ("多少钱", "花了多少", "赚了多少", "挣了多少", "收支", "流水", "对账", "余额", "领了多少", "借款", "还款")):
+            ledger = {"单位": engine.wallet.currency_name, "工具": "maiweave_wallet",
+                      "最近流水": engine.wallet.recent_payments(session if private else "", self.speakers.get(session) if private else "", 4)}
+            if private:
+                ledger["余额"] = engine.wallet.account()["balance"]
+            add("已入账收支", ledger, True)
+        if private:
             requests = [r for r in store.all("money_request") if r["session"] == session
                         and r["user"] == self.speakers.get(session)]
             if any(w in text for w in ("车费", "路费", "坐车的钱")):
@@ -169,10 +176,6 @@ class ChatContext:
                 if offers:
                     add("通勤车费", {**select_fields(offers[0], ("id", "title", "amount", "departure")),
                                     "工具": "maiweave_wallet", "说明": "出发前明确借出用 lend，超过出发时间先改班。"}, True)
-            if any(w in text for w in ("多少钱", "花了多少", "赚了多少", "挣了多少", "收支", "流水", "对账", "余额", "领了多少")):
-                add("已入账收支", {"单位": engine.wallet.currency_name, "余额": engine.wallet.account()["balance"],
-                                  "最近流水": engine.wallet.recent_payments(session, self.speakers.get(session), 4),
-                                  "工具": "maiweave_wallet"}, True)
             if requests and any(w in text for w in ("借", "钱", "还款", "给你", "送你", "工资", "元", engine.wallet.currency_name)):
                 add("虚拟钱包", {"货币名称": engine.wallet.currency_name, "余额": engine.wallet.account()["balance"], "最近借款":
                     select_fields(requests[-1], ("id", "title", "amount", "status", "owed")), "工具": "maiweave_wallet"}, True)
@@ -261,6 +264,8 @@ class ChatContext:
             before = len(dump(snapshot))
             # 缩短文本、减少条目时保持完整 JSON，详情仍由查询工具提供。
             options = [brief(value, chars, count), brief(value, min(chars, 120), 1)]
+            if key == "已入账收支":
+                options.insert(0, brief(value, 80, 4))
             if key == "pending_changes":
                 options.append([{k: row[k] for k in ("id", "action")} for row in value[:1]])
             if key == "shared_topics":

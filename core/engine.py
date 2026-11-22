@@ -536,8 +536,8 @@ class LifeEngine:
         elif not plan.get("book_id"):
             self.progress_goal(plan)
 
-    def current(self, now: datetime) -> dict | None:
-        return next((p for p in self.store.all("plan") if p["status"] in ACTIVE
+    def current(self, now: datetime, plans=None) -> dict | None:
+        return next((p for p in (self.store.all("plan") if plans is None else plans) if p["status"] in ACTIVE
                      and self.time(p["start"]) <= now < self.time(p["end"])), None)
 
     def free_minutes(self, now: datetime) -> int:
