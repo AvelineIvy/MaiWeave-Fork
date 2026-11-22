@@ -84,6 +84,8 @@
 
 当前活动、一天的轨迹、精力心情和主动交流记录，都能在「此刻生活」里找到。
 
+地图上的一天按麦麦的生活时区过。早上 6 点天亮，傍晚 6 点楼窗和路灯亮起来，夜里 11 点，楼窗暗下来，只留街边和河岸的路灯。
+
 <p align="center">
   <a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-overview.png"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-overview.png" width="800" alt="当前睡眠状态、一天的日程、主动交流与状态变化"></a>
 </p>
