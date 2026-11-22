@@ -143,6 +143,15 @@ class Spatial:
             return max(previous, key=lambda p: self.engine.time(p["end"]))["location"]
         return self.engine.state()["location"]
 
+    def check_after_reading(self, location, end, excluded=""):
+        fixed = min((p for p in self.engine.store.all("plan") if p["id"] != excluded
+                     and p["status"] == "scheduled" and not p.get("activity_id") and not p.get("flexible")
+                     and self.engine.time(p["start"]) >= end), key=lambda p: self.engine.time(p["start"]), default=None)
+        if fixed and fixed["location"] and fixed["kind"] != "travel":
+            minutes = self.travel_route(location, fixed["location"])["minutes"]
+            if end + timedelta(minutes=minutes) > self.engine.time(fixed["start"]):
+                raise ValueError(f"阅读结束后赶不上下一项固定安排，请预留 {minutes} 分钟出行时间")
+
     def reconcile(self, now):
         """沿整条未完成时间线重算后续路线，固定安排冲突进入待调整。"""
         engine, store = self.engine, self.engine.store
@@ -253,6 +262,8 @@ class Spatial:
             route = self.route(self.engine.state()["location"], plan["location"])
             arrival = now + timedelta(minutes=route["minutes"])
             end = arrival + timedelta(seconds=plan["remaining_seconds"])
+            if plan.get("book_id"):
+                self.check_after_reading(plan["location"], end, plan_id)
             self.engine._check_interval(now, end, {plan_id, plan.get("travel_id", "")})
             plan.update(start=arrival.isoformat(), end=end.isoformat(), status="scheduled")
             plan["changes"].append({"at": now.isoformat(), "action": "恢复活动并重新安排出行"})
@@ -260,6 +271,8 @@ class Spatial:
                 self.engine.store.put("plan", plan)
             result = plan
         else:
+            if action == "resume" and plan["status"] == "paused" and plan.get("book_id"):
+                self.check_after_reading(self.engine.state()["location"], now + timedelta(seconds=plan["remaining_seconds"]), plan_id)
             result = self.engine.transition(plan_id, action, session, now)
         if action == "cancel" and plan.get("sleep_deadline"):
             with self.engine.store.db:
@@ -306,6 +319,9 @@ class Spatial:
     def change(self, plan_id, patch, session, now):
         old = self.engine.owned("plan", plan_id, session)
         changes = patch.model_dump(exclude_unset=True)
+        if old.get("book_id") and changes.get("kind", old["kind"]) in {"study", "leisure"} and {"start", "end", "location"} & changes.keys():
+            self.check_after_reading(changes.get("location", old["location"]) or self.engine.state()["location"],
+                                     self.engine.time(changes.get("end", old["end"])), plan_id)
         if not {"start", "location"} & changes.keys() or old["kind"] == "travel":
             self.engine.change_plan(plan_id, patch, session, now)
             self.reconcile(now)
@@ -343,6 +359,9 @@ class Spatial:
     def schedule(self, value: PlanInput, session: str, now, autonomous: bool = False, user_id=None, sleep_deadline: str = "") -> dict:
         """地点变化时，在活动前显式安排出行时间。"""
         self.engine.validate_plan(value, session, now)
+        if value.book_id:
+            self.check_after_reading(value.location or self.projected_location(self.engine.time(value.start), now),
+                                     self.engine.time(value.end))
         if user_id is not None:
             start, end = self.engine.time(value.start), self.engine.time(value.end)
             if value.location and value.kind != "travel":

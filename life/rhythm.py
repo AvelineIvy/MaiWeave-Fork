@@ -109,14 +109,14 @@ class Rhythm:
 
     def materialize(self, now):
         zone = ZoneInfo(self.engine.timezone)
-        worked = {(p["routine_id"], p.get("routine_date")) for p in self.engine.store.all("plan")
-                  if p.get("routine_id") and p["kind"] == "work" and p["status"] in {"active", "paused", "awaiting_confirmation", "completed"}}
+        attended = {(p["routine_id"], p.get("routine_date")) for p in self.engine.store.all("plan")
+                    if p.get("routine_id") and p["kind"] in {"work", "study"} and p["status"] in {"active", "paused", "awaiting_confirmation", "completed"}}
         for rule in self.engine.store.all("routine"):
             if rule["status"] != "active":
                 continue
             for offset in range(self.config.rhythm.horizon_days):
                 day = now.date() + timedelta(days=offset)
-                if not matches(rule, day) or (rule["id"], day.isoformat()) in worked:
+                if not matches(rule, day) or (rule["id"], day.isoformat()) in attended:
                     continue
                 key = f"{rule['id']}:{rule['revision']}:{day.isoformat()}"
                 if self.engine.store.find("occurrence", key):

@@ -378,12 +378,15 @@ class Living:
                         with store.db:
                             store.delete("book_note", plan["id"])
                 else:
+                    if plan.get("book_id"):
+                        with store.db:
+                            store.delete("book_note", plan["id"])
                     plan.update(pay=0, hourly_pay=0, cost=0, purchase_request="")
                     plan.pop("shift_scene", None)
                     plan.pop("shift_started", None)
                     plan.update(title="室内休息" if state["energy"] < 25 or state["stress"] >= 70 else "室内休闲",
                                 kind="rest" if state["energy"] < 25 or state["stress"] >= 70 else "leisure",
-                                location=self.spatial.place("home")["name"], goal_id="", goal_step_id="", book_id="", continuation_id="")
+                                location=self.spatial.place("home")["name"], goal_id="", goal_step_id="", book_id="", continuation_id="", research_query="")
                 start += timedelta(minutes=self.spatial.route(state["location"], plan["location"])["minutes"])
             plan.update(start=start.isoformat(), end=(start + duration).isoformat(), status="scheduled", motivation=why)
             plan["changes"].append({"at": now.isoformat(), "action": "动态调整", "before": before, "reason": why})
@@ -435,8 +438,15 @@ class Living:
 
     def is_reading(self, plan):
         """按本次活动的书籍、名称和已保存类别识别阅读。"""
-        return bool(plan.get("book_id") or self.reading_title(plan["title"])
-                    or self.reading_title(plan.get("activity_label", "")))
+        if plan.get("book_id"):
+            return True
+        if plan.get("kind") not in {"leisure", "study"} or plan.get("research_query") or (
+                plan.get("routine_id") and plan["kind"] == "study"):
+            return False
+        if plan["kind"] == "study":
+            return ("《" in plan["title"] and self.reading_title(plan["title"])
+                    or plan["title"] in {"阅读", "读书", "看书", "读几页书"} or plan.get("activity_label") == "阅读")
+        return self.reading_title(plan["title"]) or self.reading_title(plan.get("activity_label", ""))
 
     def reading_allowance(self, now):
         """按今天已读时长和上次阅读时间，计算自主阅读可用分钟。"""
@@ -639,6 +649,15 @@ class Living:
                 "根据仍在有效期内的天气选择活动，恶劣天气优先在室内休息或活动。"
             )
             def validate_activity(choice):
+                if (not choice.book_id and not choice.research_query and books and choice.kind in {"study", "leisure"}
+                        and self.reading_title(choice.title)):
+                    named = max((b for b in books if b["title"] in choice.title), key=lambda b: len(b["title"]), default=None)
+                    if named:
+                        choice.book_id = named["id"]
+                    elif "《" not in choice.title and self.is_reading(choice.model_dump()):
+                        choice.book_id = books[0]["id"]
+                if choice.book_id and (choice.kind not in {"study", "leisure"} or not any(b["id"] == choice.book_id for b in books)):
+                    raise ValueError("阅读书架时选学习或休闲，并填写书架中的书籍 ID；其他活动将 book_id 留空")
                 if state["hunger"] >= 65 and choice.kind not in {"cook", "meal"}:
                     raise ValueError("当前饥饿程度已达到65，请选择吃饭meal或做饭cook；已有待吃饭菜时优先meal")
                 if choice.continuation_id:
@@ -725,9 +744,6 @@ class Living:
         if minutes < 1:
             return "预留出行时间后，剩余空档不足"
         start = now + timedelta(minutes=travel_minutes)
-        if not research_query and not book_id and books and self.reading_title(title):
-            current_book = engine.store.find("runtime", "current_book")
-            book_id = next((b["id"] for b in books if current_book and b["id"] == current_book["book_id"]), books[0]["id"])
         if book_id:
             book = engine.store.get("book", book_id)
             title = f"阅读《{book['title']}》"

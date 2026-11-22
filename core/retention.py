@@ -26,7 +26,7 @@ class Retention:
                 protected_plans.add(plan["id"])
             if plan.get("book_id") and plan["status"] == "completed":
                 note = store.find("book_note", plan["id"])
-                if not note or note["status"] not in {"已完成", "本书已读完"}:
+                if not note or note["status"] not in {"已完成", "本书已读完", "书籍已删除"}:
                     protected_plans.add(plan["id"])
         for category in ("reflection", "dream"):
             for row in store.all(category):

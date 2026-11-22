@@ -56,6 +56,7 @@ class Continuity:
         current = self.engine.current(now)
         if (self.config.continuity.outcomes_enabled and current
                 and (current["kind"] == "work" or current["kind"] == "study" and current.get("routine_id"))
+                and not current.get("book_id") and not current.get("research_query")
                 and current["status"] == "active" and current["simulation"] and not current["participants"]
                 and not current.get("shift_started")):
             await self.start_shift(current, now)

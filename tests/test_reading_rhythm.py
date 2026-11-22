@@ -132,6 +132,24 @@ async def test_reading_category_stays_with_its_plan(plugin):
     assert plugin.living.activity_balance(now)["totals"][0]["activity"] == "阅读"
 
 
+@pytest.mark.parametrize(("kind", "title"), [("work", "带学生做阅读理解"), ("study", "阅读实验记录")])
+async def test_academic_tasks_with_reading_in_title(plugin, kind, title):
+    p = plugin
+    await upload(p)
+    now = p.now().replace(hour=16, minute=0, second=0, microsecond=0)
+    p.config.life.autonomous = True
+    p.config.life.schedule_enabled = False
+    p.config.books.autonomous_minutes = 0
+    with p.store.db:
+        p.store.put("state", {**p.engine.state(), "updated_at":now.isoformat(), "energy":80, "hunger":20})
+    p.ctx.llm.generate.return_value = {"success":True, "response":json.dumps({
+        "title":title, "kind":kind, "minutes":30, "location":"住处", "motivation":"处理手头任务"})}
+    await p.living.choose_activity(now)
+    plan = p.engine.current(now)
+    assert plan["title"] == title and not plan["book_id"]
+    assert p.ctx.llm.generate.await_count == 1
+
+
 async def test_reading_followup_can_shop_after_reading_limit(plugin):
     now=plugin.now().replace(hour=16,minute=0,second=0,microsecond=0)
     past_reading(plugin,now,90,60)

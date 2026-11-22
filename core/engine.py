@@ -149,6 +149,8 @@ class LifeEngine:
         if value.research_query and (value.book_id or not value.simulation or value.participants or value.kind not in {"study", "leisure"}):
             raise ValueError("联网了解使用角色独自进行的学习或休闲日程")
         if value.book_id:
+            if value.kind not in {"study", "leisure"}:
+                raise ValueError("书架阅读请选择学习或休闲日程")
             book = self.store.get("book", value.book_id)
             if book.get("archived"):
                 raise ValueError("请先恢复已归档书籍，再安排阅读")
@@ -196,6 +198,8 @@ class LifeEngine:
         updated.update(start=start.isoformat(), end=end.isoformat())
         if updated["kind"] != plan["kind"]:
             updated.update(pay=0, cost=0, hourly_pay=0, purchase_request="")
+            if updated["kind"] not in {"study", "leisure"}:
+                updated.update(book_id="", research_query="")
         elif updated.get("hourly_pay"):
             updated["pay"] = round(updated["hourly_pay"] * (end - start).total_seconds() / 3600)
         if any(updated[k] != plan[k] for k in ("kind", "title", "location", "start")):
@@ -207,6 +211,8 @@ class LifeEngine:
         elif updated["status"] == "paused" and "end" in changes:
             updated["remaining_seconds"] = (end - now).total_seconds()
         with self.store.db:
+            if plan.get("book_id") and not updated.get("book_id"):
+                self.store.delete("book_note", record_id)
             self.store.put("plan", updated)
         return updated
 

@@ -6,9 +6,67 @@ from datetime import timedelta
 from zipfile import ZipFile
 import pytest
 from maiweave.life.books import parse_book
+from maiweave.core.models import PlanInput, PlanPatch, RoutineInput
 from test_plugin import plugin
 
 TEXT = '# 第一章 风\n风吹过窗前的银杏树。\n# 第二章 灯\n夜里一盏灯照着书页。'
+
+
+async def test_reading_preserves_commute_to_fixed_shift(plugin):
+    p = plugin
+    book = await upload(p)
+    now = p.now()
+    duty = now + timedelta(hours=2)
+    work = p.spatial.schedule(PlanInput(title="图书整理", kind="work", location="图书馆",
+                              start=duty.isoformat(), end=(duty+timedelta(hours=2)).isoformat()), "", now)
+    travel = p.spatial.route("住处", "图书馆")["minutes"]
+    start = duty - timedelta(minutes=30+travel)
+    with pytest.raises(ValueError, match="预留"):
+        p.books.schedule(book["id"], (start+timedelta(minutes=1)).isoformat(), 30, p.spatial, now)
+    reading = p.books.schedule(book["id"], start.isoformat(), 30, p.spatial, now)
+    with pytest.raises(ValueError, match="预留"):
+        p.spatial.change(reading["id"], PlanPatch(end=(duty-timedelta(minutes=travel-1)).isoformat()), "", now)
+    assert p.store.get("plan", work["id"])["status"] == "scheduled"
+    assert p.store.get("plan", reading["id"])["end"] == (duty-timedelta(minutes=travel)).isoformat()
+    p.engine.advance(start+timedelta(minutes=5))
+    p.spatial.transition(reading["id"], "pause", "", start+timedelta(minutes=5))
+    with pytest.raises(ValueError, match="预留"):
+        p.spatial.transition(reading["id"], "resume", "", start+timedelta(minutes=6))
+    assert p.store.get("plan", reading["id"])["status"] == "paused"
+
+
+async def test_changing_reading_while_note_is_generated(plugin):
+    p = plugin
+    book = await upload(p)
+    now = p.now()
+    plan = p.books.schedule(book["id"], now.isoformat(), 15, p.spatial, now)
+    p.engine.advance(now)
+    answer(p)
+    async def switch_activity(*args, **kwargs):
+        p.spatial.change(plan["id"], PlanPatch(kind="work", title="核对账目"), "", now)
+        return p.ctx.llm.generate.return_value
+    p.ctx.llm.generate.side_effect = switch_activity
+    await p.books.process(now)
+    p.engine.advance(now+timedelta(minutes=16))
+    await p.books.process(now+timedelta(minutes=16))
+    assert not p.store.find("book_note", plan["id"])
+    assert p.store.get("book", book["id"])["read_characters"] == 0
+    assert p.books.manage("delete",book["id"])["status"].startswith("书籍已删除")
+
+
+async def test_editing_today_after_class_does_not_repeat_it(plugin):
+    p = plugin
+    now = p.now().replace(hour=7, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    value = RoutineInput(title="阅读理解课", kind="study", frequency="daily", start_time="09:00", duration_minutes=45, anchor_date=now.date().isoformat())
+    rule = p.rhythm.save(value, "", now)
+    p.rhythm.materialize(now)
+    later = now.replace(hour=12)
+    p.engine.advance(later)
+    p.rhythm.save(value.model_copy(update={"start_time":"14:00"}), "", later, rule["id"])
+    p.rhythm.materialize(later)
+    today = [r for r in p.store.all("plan") if r.get("routine_id")==rule["id"] and r["routine_date"]==now.date().isoformat()]
+    assert len(today)==1 and today[0]["status"]=="completed"
+    assert p.living.reading_allowance(later)["read_minutes"]==0
 
 
 async def test_unknown_book_action_does_not_schedule_reading(plugin):

@@ -118,7 +118,12 @@ class Books:
             self.abort_upload(upload["id"])
         with engine.store.db:
             for row in engine.store.all("book_note"):
-                if row.get("book_id") and row["status"] == "阅读中":
+                if row["status"] in {"已完成", "本书已读完", "书籍已删除"}:
+                    continue
+                plan = engine.store.find("plan", row["id"])
+                if plan and plan.get("book_id") != row.get("book_id"):
+                    engine.store.delete("book_note", row["id"])
+                elif row.get("book_id") and row["status"] == "阅读中":
                     engine.store.put("book_note", {**row, "status": "待阅读", "error": "阅读任务已中断，将继续处理"})
 
     def capacity(self):
@@ -216,6 +221,8 @@ class Books:
             plans = [p for p in store.all("plan") if p.get("book_id") == book_id]
             if any(p["status"] in {"scheduled", "active", "paused", "blocked"} for p in plans):
                 raise ValueError("这本书还有阅读日程，请先完成或取消，再删除")
+            if any(p["status"] == "completed" and not store.find("book_note", p["id"]) for p in plans):
+                raise ValueError("阅读刚刚结束，请等阅读笔记整理好再删除")
             if any(n["book_id"] == book_id and n["status"] in {"阅读中", "等待活动结束", "待阅读", "阅读失败"} and (store.find("plan", n["id"]) or {"status": n.get("plan_status", "completed")})["status"] != "cancelled" for n in store.all("book_note")):
                 raise ValueError("这本书的阅读笔记正在处理，请完成后再删除")
             for path in self.directory.glob(book_id + ".*"):
@@ -287,10 +294,12 @@ class Books:
             if plan["book_id"] == book_id:
                 replacement = replacement.model_copy(update={k: plan[k] for k in ("goal_id", "goal_step_id", "continuation_id")})
             engine._check_interval(now, engine.time(plan["end"]), plan["id"])
-        if action in {"seek", "skip"}:
-            book.update(chapter=target, offset=0, status="在读", last_navigation={"at": now.isoformat(), "action": action, "chapter": target})
-            with store.db:
+        with store.db:
+            if action in {"seek", "skip"}:
+                book.update(chapter=target, offset=0, status="在读", last_navigation={"at": now.isoformat(), "action": action, "chapter": target})
                 store.put("book", book)
+            if plan:
+                engine.validate_plan(replacement, plan["session_id"], now)
         if plan:
             engine.transition(plan["id"], "cancel", session, now)
             new_plan = engine.create_plan(replacement, plan["session_id"], now, autonomous=plan["autonomous"])
@@ -347,15 +356,19 @@ class Books:
         plans = sorted([p for p in store.all("plan") if p.get("book_id") and p["status"] in {"active", "completed"}], key=lambda p: p["start"])
         for plan in plans:
             note = store.find("book_note", plan["id"])
-            if note and (note["status"] in {"已完成", "阅读中", "本书已读完"} or (note.get("retry_at") and self.engine.time(note["retry_at"]) > now)):
+            if note and (note["status"] in {"已完成", "阅读中", "本书已读完", "书籍已删除"} or (note.get("retry_at") and self.engine.time(note["retry_at"]) > now)):
                 continue
-            book = store.get("book", plan["book_id"])
+            book = store.find("book", plan["book_id"])
+            if not book:
+                with store.db:
+                    store.put("book_note", {"id": plan["id"], "book_id": plan["book_id"], "status": "书籍已删除", "error": ""})
+                continue
             if note and note["status"] == "等待活动结束" and (book["chapter"], book["offset"]) != (note["chapter"], note["offset"]):
                 note = None
             if not note or note["status"] != "等待活动结束":
                 await self.prepare(plan, now)
             plan = store.get("plan", plan["id"])
-            if plan["status"] == "completed":
+            if plan["status"] == "completed" and plan.get("book_id"):
                 self.complete(plan, now)
 
     async def prepare(self, plan, now):
@@ -366,6 +379,8 @@ class Books:
                 store.put("book_note", {"id": plan["id"], "book_id": book["id"], "status": "本书已读完", "error": ""})
             return
         chapters = json.loads(await asyncio.to_thread((self.directory / (book["id"] + ".json")).read_text, encoding="utf-8"))
+        if (store.find("plan", plan["id"]) or {}).get("book_id") != book["id"]:
+            return
         chapter, offset = book["chapter"], book["offset"]
         directory = directory_sections(chapters)
         skipped = []
@@ -407,12 +422,16 @@ class Books:
             raise
         finally:
             with store.db:
-                store.put("book_note", note)
+                current = store.find("plan", plan["id"])
+                if current and current.get("book_id") == book["id"] and current["location"] == note["location"]:
+                    store.put("book_note", note)
+                else:
+                    store.delete("book_note", plan["id"])
 
     def complete(self, plan, now):
         store = self.engine.store
-        note = store.get("book_note", plan["id"])
-        if note["status"] != "等待活动结束":
+        note = store.find("book_note", plan["id"])
+        if not note or note["status"] != "等待活动结束":
             return
         book = store.get("book", note["book_id"])
         book.update(chapter=note["next_chapter"], offset=note["next_offset"], read_characters=book["read_characters"] + note.get("read_characters", note["end"] - note["offset"]))
@@ -426,7 +445,7 @@ class Books:
                 self.engine.score_result(event, note["importance"], note["score_reason"])
             event.update(summary=f"阅读《{book['title']}》：{note['summary']}", source="observed",
                          evidence=f"模型已阅读上传文件 {book['filename']}，第{note.get('text_chapter', note['chapter']) + 1}章字符{note.get('text_offset', note['offset'])}至{note['end']}",
-                         details={"书名": book["title"], "章节": note["chapter_title"], "内容": note["summary"], "原文摘句": note["quote"],
+                         details={**event["details"], "书名": book["title"], "章节": note["chapter_title"], "内容": note["summary"], "原文摘句": note["quote"],
                                   "角色读后感": note["thoughts"], "读后问题": note["question"], "阅读地点": note.get("location", plan["location"])})
             if plan.get("continuation_id"):
                 continuation = store.get("activity_memory", plan["continuation_id"])
