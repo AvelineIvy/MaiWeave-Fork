@@ -97,15 +97,43 @@ class Wallet:
             return f"下次交租 {rent['next']} · {rent['amount']} {self.currency_name}"
         return ""
 
-    def _post(self, key, amount, title, now):
+    def _post(self, key, amount, title, now, session="", user=""):
         if self.store.find("payment", key):
             return False
         account = self.account()
         account["balance"] += amount
         self.store.put("runtime", account)
         self.store.put("payment", {"id": key, "amount": amount, "balance": account["balance"],
-                                   "title": title, "at": now.isoformat()})
+                                   "title": title, "at": now.isoformat(), "session": session, "user": user})
         return True
+
+    def recent_payments(self, session, user, limit=8):
+        """按时间取公共生活和当前私聊可见的流水。"""
+        result = []
+        page = 1
+        while len(result) < limit:
+            batch = self.store.page("payment", page=page, size=20, time_field="at")
+            for row in batch["items"]:
+                kind, _, source = row["id"].partition(":")
+                if "session" in row:
+                    if row["session"] not in ("", session) or row.get("user") not in ("", user):
+                        continue
+                elif kind in {"来款", "还款"}:
+                    key = source.partition(":")[2] if kind == "还款" else source
+                    loan = self.store.find("money_request", key)
+                    if not loan or (loan["session"], loan["user"]) != (session, user):
+                        continue
+                elif kind != "房租":
+                    plan = self.store.find("plan", source)
+                    if not plan or plan["session_id"] not in ("", session):
+                        continue
+                result.append({k: row[k] for k in ("title", "amount", "at")})
+                if len(result) == limit:
+                    break
+            if page >= batch["pages"]:
+                break
+            page += 1
+        return result
 
     def pay_fare(self, plan, now):
         fare = sum(leg.get("fare", 0) for leg in plan["route"]["legs"])
@@ -115,7 +143,7 @@ class Wallet:
         balance = self.account()["balance"]
         if balance < fare:
             return f"车费需要 {fare} {self.currency_name}，存款只有 {balance} {self.currency_name}"
-        self._post("车费:" + plan["id"], -fare, plan["title"], now)
+        self._post("车费:" + plan["id"], -fare, plan["title"], now, plan.get("session_id", ""))
         return ""
 
     def settle(self, plan, now):
@@ -136,15 +164,15 @@ class Wallet:
         if fare and self.store.find("payment", "车费:" + plan["id"]):
             cost -= fare
         if cost:
-            self._post("消费:" + plan["id"], -cost, plan["title"], now)
+            self._post("消费:" + plan["id"], -cost, plan["title"], now, plan.get("session_id", ""))
         amount = plan.get("pay", 0)
-        if amount and self._post("工钱:" + plan["id"], amount, plan["title"], now):
+        if amount and self._post("工钱:" + plan["id"], amount, plan["title"], now, plan.get("session_id", "")):
             available = min(amount, self.account()["balance"])
             for request in self.store.all("money_request"):
                 if request["status"] != "借入" or available <= 0:
                     continue
                 paid = min(request["owed"], available)
-                self._post("还款:" + plan["id"] + ":" + request["id"], -paid, "归还借款 · " + request["title"], now)
+                self._post("还款:" + plan["id"] + ":" + request["id"], -paid, "归还借款 · " + request["title"], now, request["session"], request["user"])
                 request["owed"] -= paid
                 available -= paid
                 if not request["owed"]:
@@ -269,7 +297,7 @@ class Wallet:
                 if amount < 0 or amount > limit:
                     raise ValueError(f"这笔生活费还差{limit}{self.currency_name}，请核对金额")
                 row["amount"] = amount or limit
-                self._post("来款:" + key, row["amount"], status + " · " + row["title"], now)
+                self._post("来款:" + key, row["amount"], status + " · " + row["title"], now, session, user)
             row.update(status=status, owed=row["amount"] if action == "lend" else 0)
             self.store.put("money_request", row)
             if action in {"lend", "give"}:

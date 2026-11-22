@@ -319,3 +319,19 @@ async def test_rmb_prices_and_shift_defaults(plugin):
     assert (await shift(rule_id=rule["id"], pay=280))["pay"] == 280
     assert (await shift(rule_id=rule["id"]))["pay"] == 280
     assert (await shift(rule_id=rule["id"], pay=0))["pay"] == 0
+
+async def test_private_wallet_lists_only_visible_posted_payments(plugin):
+    p = plugin
+    wallet = p.engine.wallet
+    now = p.now()
+    with p.store.db:
+        wallet._post("消费:早餐", -8, "早餐", now)
+        wallet._post("工钱:排班", 60, "固定班", now, "private")
+        wallet._post("来款:借款", 2, "借车费", now, "private", "同伴")
+        wallet._post("消费:另一个约定", -10, "私下送礼", now, "another")
+        p.store.put("payment", {"id": "房租:2026-11", "amount": -90, "title": "旧账房租", "at": now.isoformat()})
+        p.store.put("payment", {"id": "消费:来源已清理", "amount": -12, "title": "旧账", "at": now.isoformat()})
+    result = await p.wallet_action("list", stream_id="private", user_id="同伴")
+    assert [r["amount"] for r in result["content"]["payments"]] == [-90, 2, 60, -8]
+    assert [r["amount"] for r in wallet.recent_payments("private", "别人")] == [-90, 60, -8]
+    assert [r["title"] for r in wallet.recent_payments("another", "别人", 2)] == ["旧账房租", "私下送礼"]

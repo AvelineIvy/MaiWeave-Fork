@@ -169,6 +169,10 @@ class ChatContext:
                 if offers:
                     add("通勤车费", {**select_fields(offers[0], ("id", "title", "amount", "departure")),
                                     "工具": "maiweave_wallet", "说明": "出发前明确借出用 lend，超过出发时间先改班。"}, True)
+            if any(w in text for w in ("多少钱", "花了多少", "赚了多少", "挣了多少", "收支", "流水", "对账", "余额", "领了多少")):
+                add("已入账收支", {"单位": engine.wallet.currency_name, "余额": engine.wallet.account()["balance"],
+                                  "最近流水": engine.wallet.recent_payments(session, self.speakers.get(session), 4),
+                                  "工具": "maiweave_wallet"}, True)
             if requests and any(w in text for w in ("借", "钱", "还款", "给你", "送你", "工资", "元", engine.wallet.currency_name)):
                 add("虚拟钱包", {"货币名称": engine.wallet.currency_name, "余额": engine.wallet.account()["balance"], "最近借款":
                     select_fields(requests[-1], ("id", "title", "amount", "status", "owed")), "工具": "maiweave_wallet"}, True)
