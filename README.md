@@ -84,11 +84,19 @@
 
 当前活动、一天的轨迹、精力心情和主动交流记录，都能在「此刻生活」里找到。
 
-地图上的一天按麦麦的生活时区过。早上 6 点天亮，傍晚 6 点楼窗和路灯亮起来，夜里 11 点，楼窗暗下来，只留街边和河岸的路灯。
-
 <p align="center">
   <a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-overview.png"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-overview.png" width="800" alt="当前睡眠状态、一天的日程、主动交流与状态变化"></a>
 </p>
+
+### 🌇 生活地图 · 从天亮到熄灯
+
+地图上的一天按麦麦的生活时区过。看看桥边的花店：白天看得见门口的花，傍晚橱窗亮起来，到了深夜，河边只剩一排路灯。
+
+| 时段 | 街区灯光 |
+| --- | --- |
+| ☀️ **白天**<br>06:00–18:00 | <a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-day.webp"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-day.webp" width="680" alt="白天的街区，大学、花店和河岸步道清晰可见"></a> |
+| 🌆 **夜晚**<br>18:00–23:00 | <a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-evening.webp"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-evening.webp" width="680" alt="夜晚的同一街区，店铺、住宅窗户和路灯亮起"></a> |
+| 🌙 **深夜**<br>23:00–次日 06:00 | <a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-late.webp"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-late.webp" width="680" alt="深夜楼窗熄灯，道路和桥边仍亮着路灯"></a> |
 
 ### 📸 图文分享 · 做好了，想给你看看
 
