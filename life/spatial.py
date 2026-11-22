@@ -92,28 +92,37 @@ class Spatial:
             self.engine.store.put("route", record)
         return record
 
-    def route(self, origin: str, destination: str) -> dict:
+    def route(self, origin: str, destination: str, *, budget: int | None = None) -> dict:
         start, end = self.place(origin), self.place(destination)
         graph = {}
         for edge in self.engine.store.all("route"):
             for a, b in [(edge["origin"], edge["destination"]), (edge["destination"], edge["origin"])]:
                 graph.setdefault(a, []).append((b, edge["minutes"], edge["mode"], edge.get("fare", 0)))
         serial = count()
-        queue, visited = [(0, next(serial), start["id"], [])], set()
+        queue, cheapest = [(0, next(serial), start["id"], 0, [])], {}
         while queue:
-            minutes, _, node, legs = heapq.heappop(queue)
-            if node in visited:
+            minutes, _, node, spent, legs = heapq.heappop(queue)
+            if node in cheapest and (budget is None or cheapest[node] <= spent):
                 continue
-            visited.add(node)
+            cheapest[node] = spent
             if node == end["id"]:
                 return {"origin": start["name"], "destination": end["name"], "minutes": minutes, "legs": legs}
             for target, duration, mode, fare in graph.get(node, []):
-                if target not in visited:
+                if budget is None or spent + fare <= budget:
                     leg = {"origin": self.place(node)["name"], "destination": self.place(target)["name"], "minutes": duration, "mode": mode}
                     if fare:
                         leg["fare"] = fare
-                    heapq.heappush(queue, (minutes + duration, next(serial), target, legs + [leg]))
+                    heapq.heappush(queue, (minutes + duration, next(serial), target, spent + fare, legs + [leg]))
+        if budget is not None:
+            raise ValueError(f"存款 {budget} {self.engine.wallet.currency_name}，不够支付从{start['name']}到{end['name']}的车费")
         raise ValueError("地点之间没有连通路线，请先补充路线")
+
+    def travel_route(self, origin, destination):
+        route = self.route(origin, destination)
+        balance = self.engine.wallet.account()["balance"]
+        if sum(leg.get("fare", 0) for leg in route["legs"]) > max(0, balance):
+            return self.route(origin, destination, budget=max(0, balance))
+        return route
 
     def projected_location(self, at, now, excluded=()) -> str:
         previous = [p for p in self.engine.store.all("plan") if p["id"] not in excluded and p["status"] in ACTIVE and self.engine.time(p["end"]) <= at and self.engine.time(p["end"]) >= now and p["location"]]
@@ -144,7 +153,7 @@ class Spatial:
             start, end = engine.time(plan["start"]), engine.time(plan["end"])
             duration = end - start
             try:
-                route = self.route(origin, plan["location"]) if plan["location"] else {"minutes": 0, "legs": [], "origin": origin, "destination": origin}
+                route = self.travel_route(origin, plan["location"]) if plan["location"] else {"minutes": 0, "legs": [], "origin": origin, "destination": origin}
                 minutes = route["minutes"] if plan["kind"] != "travel" else 0
                 earliest = available + timedelta(minutes=minutes)
                 proposed = max(start, earliest)
@@ -262,7 +271,7 @@ class Spatial:
 
     def move(self, destination: str, session: str, now) -> dict:
         self.engine.advance(now)
-        route = self.route(self.engine.state()["location"], destination)
+        route = self.travel_route(self.engine.state()["location"], destination)
         if route["minutes"] == 0:
             raise ValueError("已经在这个地点")
         plan = self.engine.create_plan(PlanInput(title=f"前往{route['destination']}", kind="travel", start=now.isoformat(),

@@ -356,7 +356,7 @@ function paintMap(map,unit){
   }
  }
  const when=r=>r.at.slice(5,16).replace('T',' ')+' · '+r.title;
- group('接下来的班次',map.shifts.filter(r=>r.location===place.name).slice(0,3).map(r=>when(r)+' · '+r.pay+' '+unit));
+ group('接下来的班次',map.shifts.filter(r=>r.location===place.name).slice(0,3).map(r=>when(r)+' · '+(r.blocking_reason?'待调整：'+r.blocking_reason:r.pay+' '+unit)));
  group('最近来过',map.visits.filter(r=>r.location===place.name).slice(-2).reverse().map(when));
 }
 function paintWallet(d){

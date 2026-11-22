@@ -103,6 +103,17 @@ class Wallet:
                                    "title": title, "at": now.isoformat()})
         return True
 
+    def pay_fare(self, plan, now):
+        fare = sum(leg.get("fare", 0) for leg in plan["route"]["legs"])
+        if not fare:
+            return ""
+        self._settle_rent(now)
+        balance = self.account()["balance"]
+        if balance < fare:
+            return f"车费需要 {fare} {self.currency_name}，存款只有 {balance} {self.currency_name}"
+        self._post("车费:" + plan["id"], -fare, plan["title"], now)
+        return ""
+
     def settle(self, plan, now):
         """随完成记录在同一个事务里记账。"""
         fare = sum(leg.get("fare", 0) for leg in (plan.get("route") or {}).get("legs", []))
@@ -118,6 +129,8 @@ class Wallet:
             request = self.store.get("money_request", plan["purchase_request"])
             request["purchased_at"] = now.isoformat()
             self.store.put("money_request", request)
+        if fare and self.store.find("payment", "车费:" + plan["id"]):
+            cost -= fare
         if cost:
             self._post("消费:" + plan["id"], -cost, plan["title"], now)
         amount = plan.get("pay", 0)

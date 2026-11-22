@@ -216,3 +216,55 @@ async def test_opening_balance_config_reload(plugin):
     wallet.need("花束包装纸", 40, "", p.now())
     request, = wallet.pending(p.now())
     assert "5麦币" in wallet.notice(request, "chat-a", "伙伴")[1]
+
+@pytest.mark.parametrize("case", ["缺车费", "步行绕行", "刚好够车费", "离线跨日", "补上步道"])
+async def test_rent_and_next_day_commute(plugin, monkeypatch, case):
+    now = plugin.now()
+    tomorrow = (now + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
+    monkeypatch.setattr(plugin, "now", lambda: now)
+    wallet = plugin.engine.wallet
+    wallet.set_opening(62 if case == "刚好够车费" else 60)
+    await plugin.ui_save_place("街角花房")
+    await plugin.ui_save_route("住处", "街角花房", 5, "公交", 2)
+    if case == "步行绕行":
+        await plugin.ui_save_route("楼下街道", "街角花房", 12, "步行")
+    day = tomorrow.date().isoformat()
+    rule = await plugin.ui_save_routine("花房早班", day, "09:00", 30, frequency="daily", until=day,
+                                        kind="work", location="街角花房", pay=50)
+    shift_id = next(p["id"] for p in plugin.store.all("plan") if p.get("routine_id") == rule["id"])
+    if case == "离线跨日":
+        later = await plugin.ui_save_routine("花房晚班", day, "10:00", 15, frequency="daily", until=day,
+                                            kind="work", location="街角花房", pay=20)
+    wallet.configure_rent(60, now.day, now)
+    if case != "离线跨日":
+        wallet.refresh(now)
+        plugin.spatial.reconcile(now)
+    def read_map():
+        return plugin.life_map(sorted(plugin.store.all("plan"), key=lambda p: p["start"]))
+    if case == "缺车费":
+        assert read_map()["location"] == "住处" and "车费" in read_map()["shifts"][0]["blocking_reason"]
+    if case == "补上步道":
+        assert plugin.store.get("plan", shift_id)["status"] == "blocked"
+        await plugin.ui_save_route("楼下街道", "街角花房", 12, "步行")
+        plugin.spatial.reconcile(now)
+    if case in {"步行绕行", "补上步道"}:
+        assert read_map()["next_stop"]["route"]["minutes"] == 15
+    if case == "刚好够车费":
+        now = tomorrow - timedelta(minutes=5)
+        plugin.engine.advance(now)
+        assert wallet.account()["balance"] == 0 and read_map()["journey"]["mode"] == "公交"
+    now = tomorrow + timedelta(minutes=76 if case == "离线跨日" else 31)
+    plugin.engine.advance(now)
+    state = plugin.engine.state()
+    shift = plugin.store.get("plan", shift_id)
+    entries = [r["amount"] for r in plugin.store.all("payment")]
+    if case in {"缺车费", "离线跨日"}:
+        assert shift["status"] == "blocked" and "车费" in shift["blocking_reason"]
+        assert state["location"] == "住处" and entries == [-60]
+    else:
+        assert shift["status"] == "completed" and state["location"] == "街角花房"
+        assert entries == ([-60, -2, 50] if case == "刚好够车费" else [-60, 50])
+    if case == "离线跨日":
+        assert next(p for p in plugin.store.all("plan") if p.get("routine_id") == later["id"])["status"] == "blocked"
+    plugin.engine.advance(now + timedelta(seconds=30))
+    assert len(plugin.store.all("payment")) == len(entries)

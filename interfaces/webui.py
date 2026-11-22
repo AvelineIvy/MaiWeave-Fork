@@ -858,9 +858,10 @@ class WebUI:
                 "journey": journey, "legs": route["legs"] if route else [], "next_stop": stop,
                 "visits": [{"location": p["location"], "title": p["title"], "at": p["end"]} for p in
                            sorted(plans, key=lambda p: self.engine.time(p["end"])) if p["status"] == "completed" and p["kind"] != "travel"][-40:],
-                "shifts": [{"location": p["location"], "title": p["title"], "at": p["start"], "pay": p.get("pay", 0)}
+                "shifts": [{"location": p["location"], "title": p["title"], "at": p["start"], "pay": p.get("pay", 0),
+                            "blocking_reason": p.get("blocking_reason", "")}
                            for p in plans
-                           if p["kind"] == "work" and p["status"] in {"active", "scheduled"}][:30]}
+                           if p["kind"] == "work" and p["status"] in {"active", "scheduled", "blocked"} and self.engine.time(p["end"]) >= now][:30]}
 
     @API("ui_save_place", description="添加或编辑地点")
     async def ui_save_place(self, name: str, outdoor: bool = False, description: str = "", place_id: str = "") -> dict:

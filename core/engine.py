@@ -429,10 +429,37 @@ class LifeEngine:
                     boundaries.add(t)
         times = sorted(boundaries)
         sleeping = False
+        by_id = {p["id"]: p for p in plans}
+
+        missed_trip = False
+
+        def activate(plan, at):
+            nonlocal missed_trip
+            route = plan.get("route")
+            origin = route["origin"] if route else plan["location"]
+            reason = ""
+            if missed_trip and origin and origin != state["location"]:
+                reason = f"前段出行未成，麦麦仍在{state['location']}，需要重新安排路线"
+            elif route:
+                reason = self.wallet.pay_fare(plan, at)
+            if reason:
+                missed_trip = True
+                parent = by_id.get(plan.get("activity_id"), plan)
+                plan["status"] = "cancelled"
+                parent.update(status="blocked", blocking_reason=reason)
+                self.store.put("schedule_issue", {"id": parent["id"], "session_id": parent["session_id"],
+                               "title": parent["title"], "reason": reason, "at": at.isoformat()})
+            else:
+                plan["status"] = "active"
+
         with self.store.db:
             for left, right in zip(times, times[1:]):
                 sleeping = sleep_changes.get(left, sleeping)
-                current = next((p for p in plans if self.time(p["start"]) <= left < self.time(p["end"])), None)
+                current = next((p for p in plans if p["status"] in ACTIVE and self.time(p["start"]) <= left < self.time(p["end"])), None)
+                if current and current["status"] == "scheduled":
+                    activate(current, left)
+                    if current["status"] != "active":
+                        current = None
                 seconds = (right - left).total_seconds()
                 kind = current["kind"] if current else ("sleep" if sleeping else "idle")
                 self._evolve(state, seconds / 3600, kind)
@@ -462,8 +489,9 @@ class LifeEngine:
                             self._completion_effect(state, plan)
                         else:
                             plan["status"] = "awaiting_confirmation"
-                    elif plan["status"] == "scheduled" and self.time(plan["start"]) <= right:
-                        plan["status"] = "active"
+                for plan in plans:
+                    if plan["status"] == "scheduled" and self.time(plan["start"]) <= right:
+                        activate(plan, right)
             for plan in plans:
                 self.store.put("plan", plan)
             for effect in self.store.all("effect"):
