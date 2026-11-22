@@ -818,7 +818,7 @@ class Living:
 
     def share_ready(self, record_id, session, now):
         rows = [r for r in self.engine.store.all("share_receipt") if r["session"] == session and (r.get("record_id") == record_id or record_id in r.get("candidate_ids", []))]
-        if any(r.get("sent_at") or r["outcome"] in {"MaiBot 已受理", "生成中"} for r in rows):
+        if any(r.get("sent_at") or r["outcome"] in {"MaiBot 已受理", "生成中", "待核对"} for r in rows):
             return False
         return not rows or now >= max(self.engine.time(r.get("finished_at") or r["created"]) for r in rows) + timedelta(minutes=self.config.proactive.retry_minutes)
 
@@ -862,7 +862,7 @@ class Living:
                     continue
                 at = self.engine.time(item["due_at"])
                 receipts = [r for r in store.all("share_receipt") if r["session"] == session and r.get("record_id") == self.thread_key(item)]
-                waiting = any(r["outcome"] in {"MaiBot 已受理", "生成中"} for r in receipts)
+                waiting = any(r["outcome"] in {"MaiBot 已受理", "生成中", "待核对"} for r in receipts)
                 attempts = [self.engine.time(r.get("finished_at") or r["created"]) for r in receipts]
                 if attempts:
                     at = max(at, max(attempts) + timedelta(minutes=cfg.retry_minutes))

@@ -138,3 +138,30 @@ async def test_reload_interrupts_generation_and_recovers_old_running_receipt(plu
     assert p.store.get("share_receipt", row["id"])["outcome"] == "已中断"
     p.retention.clean(p.now() + timedelta(days=20))
     assert not p.store.all("share_receipt")
+
+
+async def test_wallet_notice_recovers_only_new_outgoing_message(plugin):
+    from maiweave.integrations.share_receipts import ShareReceipts
+    p = plugin
+    now = setup(p)
+    row = {"id": "express:借款", "record_id": "repayment:画布", "session": "private",
+           "topic": "画布的钱还清了", "outcome": "生成中", "history_after": 30, "created": now.isoformat()}
+    old = {"id": 30, "user_id": "麦麦", "account_id": "麦麦", "message_id": "旧消息", "timestamp": now.isoformat()}
+    echo = {**old, "id": 31, "user_id": "聊天对象"}
+    for matching in (False, True):
+        with p.store.db:
+            p.store.put("share_receipt", row)
+        receipts = ShareReceipts(p.store, p.ctx)
+        p.ctx.db.get.return_value = [echo, old]
+        if matching:
+            p.ctx.db.get.return_value.insert(0, {**old, "id": 32, "message_id": "本次消息"})
+        await receipts.refresh(now)
+        p.ctx.db.get.assert_called_with("Messages", filters={"session_id": "private",
+                                        "processed_plain_text": row["topic"]}, order_by="-id")
+        await receipts.refresh(now)
+        recovered = p.store.get("share_receipt", row["id"])
+        if matching:
+            assert recovered["message_id"] == "本次消息" and recovered["outcome"] == "实际已发送"
+            assert len(receipts.sent_times("private", now.tzinfo)) == 1
+        else:
+            assert recovered["outcome"] == "已中断" and not recovered.get("sent_at")

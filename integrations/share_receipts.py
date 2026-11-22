@@ -48,7 +48,10 @@ class ShareReceipts:
         with store.db:
             for row in store.all("share_receipt"):
                 if row["outcome"] == "生成中":
-                    row.update(outcome="已中断", delivery="上次生成随插件停止而中断", finished_at=datetime.now().astimezone().isoformat())
+                    if "history_after" in row:
+                        row.update(outcome="待核对", delivery="等待核对钱包报信")
+                    else:
+                        row.update(outcome="已中断", delivery="上次生成随插件停止而中断", finished_at=datetime.now().astimezone().isoformat())
                     store.put("share_receipt", row)
 
     def accept(self, task, row, now):
@@ -130,15 +133,26 @@ class ShareReceipts:
                 row.update(outcome="稍后再聊", delivery="这笔生活费的情况已经更新")
                 return
             stage = "发送失败"
+            if row["record_id"].startswith(("wallet:", "repayment:", "installment:")):
+                previous = await self.ctx.db.get("Messages", filters={"session_id": session},
+                                                 order_by="-id", limit=1)
+                row["history_after"] = previous[0]["id"] if previous else 0
+                with self.store.db:
+                    self.store.put("share_receipt", row)
+                stage = "待核对"
             result = await self.ctx.send.text(text, session, return_details=True,
                                               storage_message=True, sync_to_maisaka_history=True)
             if not result["sent"]:
+                stage = "发送失败"
                 raise RuntimeError(result.get("error") or "MaiBot 返回发送失败")
             sent_at = datetime.now(now.tzinfo)
             row.update(outcome="实际已发送", delivery=f"{sent_at:%H:%M:%S} 已确认投递",
                        sent_at=sent_at.isoformat(), message_id=result["message_id"], sent_text=text[:600])
         except asyncio.CancelledError:
-            row.update(outcome="已中断", delivery="生成或发送随插件停止而中断")
+            if stage == "待核对":
+                row.update(outcome="待核对", delivery="等待核对钱包报信")
+            else:
+                row.update(outcome="已中断", delivery="生成或发送随插件停止而中断")
             raise
         except Exception as error:
             row.update(outcome=stage, delivery=str(error))
@@ -169,6 +183,20 @@ class ShareReceipts:
 
     async def refresh(self, now):
         for row in self.store.all("share_receipt"):
+            if row["outcome"] == "待核对":
+                messages = await self.ctx.db.get("Messages", filters={"session_id": row["session"],
+                    "processed_plain_text": row["topic"]}, order_by="-id")
+                match = next((m for m in messages or [] if m["id"] > row["history_after"]
+                              and m.get("account_id") and m["user_id"] == m["account_id"]), None)
+                if match:
+                    row.update(outcome="实际已发送", delivery="已从聊天记录确认投递", sent_at=match["timestamp"],
+                               sent_text=row["topic"], message_id=match["message_id"])
+                else:
+                    row.update(outcome="已中断", delivery="聊天记录中未找到这次钱包报信")
+                row["finished_at"] = datetime.now(now.tzinfo).isoformat()
+                with self.store.db:
+                    self.store.put("share_receipt", row)
+                continue
             if row["outcome"] != "MaiBot 已受理":
                 continue
             stops = False

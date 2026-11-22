@@ -41,7 +41,7 @@ class Retention:
             if row["status"] not in {"已保存", "已取消", "失败"}:
                 protected_events.add(row.get("payload", {}).get("experience_id", ""))
         for row in store.all("share_receipt"):
-            if row["outcome"] in {"MaiBot 已受理", "生成中"}:
+            if row["outcome"] in {"MaiBot 已受理", "生成中", "待核对"}:
                 protected_events.add(row.get("experience_id", ""))
         # 正在使用的出行链保留整个关联链。
         while True:
@@ -81,7 +81,7 @@ class Retention:
             rows = store.all(category)
             protected = set()
             for row in rows:
-                if category == "job" and row["status"] == "进行中" or category == "review" and row["status"] not in {"已保存", "已取消", "失败"} or category == "share_receipt" and (row["outcome"] in {"MaiBot 已受理", "生成中"} or self.time(row.get("sent_at") or row[field]) >= now - timedelta(minutes=max(1440, self.config.proactive.cooldown_minutes, self.config.proactive.retry_minutes))):
+                if category == "job" and row["status"] == "进行中" or category == "review" and row["status"] not in {"已保存", "已取消", "失败"} or category == "share_receipt" and (row["outcome"] in {"MaiBot 已受理", "生成中", "待核对"} or self.time(row.get("sent_at") or row[field]) >= now - timedelta(minutes=max(1440, self.config.proactive.cooldown_minutes, self.config.proactive.retry_minutes))):
                     protected.add(row["id"])
             delete[category] = select(rows, cfg.log_days, cfg.log_count, field, protected)
             summary.append(dict(category=category, label=label, total=len(rows), days=cfg.log_days, limit=cfg.log_count, protected=len(protected), remove=len(delete[category])))

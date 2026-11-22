@@ -45,7 +45,7 @@ def prepare(plugin, monkeypatch):
     monkeypatch.setattr(receipts, "datetime", Clock)
     cfg = plugin.config.proactive
     cfg.enabled, cfg.session_ids, cfg.mode = True, ["chat-a"], "主动表达"
-    plugin.ctx.db.get.return_value = [{"timestamp": now.isoformat(), "user_nickname": "读者", "processed_plain_text": "读到哪里了？"}]
+    plugin.ctx.db.get.return_value = [{"id": 1, "timestamp": now.isoformat(), "user_nickname": "读者", "processed_plain_text": "读到哪里了？"}]
     plugin.ctx.maisaka.reply = SimpleNamespace(generate=AsyncMock(return_value={"success": True, "text": "刚读到一个有意思的地方，想和你聊聊。"}))
     plugin.ctx.send.text.return_value = {"sent": True, "message_id": "sent-1"}
     for score in (6, 7):
