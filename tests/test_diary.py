@@ -51,6 +51,36 @@ async def test_diary_empty_day(plugin):
         await plugin.diary.write((plugin.now().date()-timedelta(days=3)).isoformat(),plugin.now())
 
 
+async def test_bad_source_ids_stop_until_new_writing_slot(plugin):
+    p = plugin
+    now = p.now()
+    day = now.date().isoformat()
+    history(p, now - timedelta(minutes=1))
+    p.ctx.chat.get_all_streams.return_value = [{"stream_id": "example"}]
+    p.ctx.message.get_by_time_in_chat.return_value = [
+        {"message_id": "sample-message", "processed_plain_text": "今天做了书签"}]
+    p.ctx.llm.generate.side_effect = None
+    def response(key):
+        return {"success": True, "response": json.dumps({"moments": [
+            {"source_ids": [key], "summary": "聊起书签", "public_summary": ""}]})}
+    p.ctx.llm.generate.return_value = response("sample-message")
+    p.engine.create_plan(PlanInput(title="写日记", kind="diary", start=now.isoformat(),
+        end=(now + timedelta(minutes=15)).isoformat(), diary_day=day), "", now)
+    p.engine.advance(now)
+    with pytest.raises(ValueError, match="chat-1"):
+        await p.diary.process(now)
+    await p.diary.process(now + timedelta(minutes=6))
+    assert p.ctx.llm.generate.await_count == 3
+    assert "请修正" in p.ctx.llm.generate.call_args.args[0]
+    later = now + timedelta(minutes=20)
+    p.engine.create_plan(PlanInput(title="再写日记", kind="diary", start=later.isoformat(),
+        end=(later + timedelta(minutes=15)).isoformat(), diary_day=day), "", later)
+    p.engine.advance(later)
+    p.ctx.llm.generate.side_effect = [response("chat-1"), {"success": True, "response": "今天聊起了书签。"}]
+    await p.diary.process(later)
+    assert p.store.get("diary", day)["content"] == "今天聊起了书签。"
+
+
 async def test_missed_diary_window_is_written_after_restart(plugin):
     now = plugin.now()
     history(plugin, now - timedelta(minutes=1))

@@ -12,7 +12,7 @@ from .living import in_hours, next_bedtime
 
 
 class DiaryMoment(BaseModel):
-    source_ids: list[str]
+    source_ids: list[str] = Field(min_length=1)
     summary: str = Field(max_length=500)
     public_summary: str = Field(max_length=300)
 
@@ -98,19 +98,27 @@ class Diary:
                     remaining -= size
         if not sources:
             return []
+        excerpts, chats = [], {}
+        for key, source in sources.items():
+            if "messages" in source:
+                content = [{"发言人": row["speaker"], "内容": row["text"]} for row in source["messages"]]
+            else:
+                content = {k: source[k] for k in ("source", "summary", "details") if k in source}
+            chat = chats.setdefault(source["session_id"], len(chats) + 1)
+            excerpts.append({"素材编号": key, "对话组": chat, "内容": content})
         prompt = (
             "整理角色今天与人的相处，输出 JSON：moments 数组，每项为 source_ids、summary、public_summary。"
-            "最多选八件值得记下的小事，重复提到的同一件事合并。source_ids 使用给出的素材编号。"
+            "最多选八件值得记下的小事，重复提到的同一件事合并。source_ids 逐字填写每组开头的素材编号，例如 chat-1。"
             "summary 写发生了什么、是谁说的、角色有什么回应；承诺和愿望按原来的语气记录。"
             "public_summary 是适合角色发空间的个人感受或日常，比如收到礼物后的开心、一次聊天带来的安慰。"
             "称呼用有人、朋友等泛称，个人身份、联系方式、私密倾诉留在 summary；适合公开的内容为空时填空字符串。"
             "不同聊天流中的人物分别处理，具体物品、动作和细节取自素材，模型自己的提议按提议记录。"
-            f"日期：{day.isoformat()}；素材：{dump(sources)}"
+            f"日期：{day.isoformat()}；素材：{dump(excerpts)}"
         )
         def validate(value):
             for moment in value.moments:
                 if not moment.source_ids or any(key not in sources for key in moment.source_ids):
-                    raise ValueError("每个片刻请填写对应素材编号")
+                    raise ValueError("source_ids 请从这些素材编号中选择：" + "、".join(sources))
                 sessions = {sources[key]["session_id"] for key in moment.source_ids}
                 if len(sessions) != 1:
                     raise ValueError("每个片刻请使用同一聊天流的素材")
@@ -173,7 +181,7 @@ class Diary:
             if plan["status"] == "completed" and old and old.get("plan_id") != plan["id"]:
                 continue
             if old and old.get("plan_id") == plan["id"]:
-                if old["status"] in {"已生成", "生成中"}:
+                if old["status"] in {"已生成", "生成中"} or old.get("manual_retry"):
                     continue
                 if old.get("retry_at") and self.engine.time(old["retry_at"]) > now:
                     continue
@@ -190,7 +198,7 @@ class Diary:
         material = self.material(day, now)
         record = {**(old or {}), "id": day.isoformat(), "day": day.isoformat(), "title": day.isoformat() + " 的一天",
                   "content": old.get("content", "") if old else "", "status": "生成中", "error": "",
-                  "plan_id": plan_id, "created_at": now.isoformat(), "complete": day < now.date(), "material": material}
+                  "plan_id": plan_id, "manual_retry": False, "created_at": now.isoformat(), "complete": day < now.date(), "material": material}
         with store.db:
             store.put("diary", record)
         try:
@@ -217,6 +225,9 @@ class Diary:
             record.update(content=content, status="已生成")
         except asyncio.CancelledError:
             record.update(status="生成失败", error="写作任务已中断", retry_at=(now + timedelta(minutes=5)).isoformat())
+            raise
+        except ValueError as error:
+            record.update(status="生成失败", error=str(error), manual_retry=True)
             raise
         except Exception as error:
             record.update(status="生成失败", error=str(error), retry_at=(now + timedelta(minutes=5)).isoformat())
