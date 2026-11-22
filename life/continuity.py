@@ -54,7 +54,8 @@ class Continuity:
         """每轮处理少量新记录；模型请求按重试规则执行，结果保存在页面。"""
         store = self.engine.store
         current = self.engine.current(now)
-        if (self.config.continuity.outcomes_enabled and current and current["kind"] == "work"
+        if (self.config.continuity.outcomes_enabled and current
+                and (current["kind"] == "work" or current["kind"] == "study" and current.get("routine_id"))
                 and current["status"] == "active" and current["simulation"] and not current["participants"]
                 and not current.get("shift_started")):
             await self.start_shift(current, now)
@@ -79,9 +80,11 @@ class Continuity:
             store.put("plan", plan)
         background = await self.work_background()
         place = next((p for p in store.all("place") if p["name"] == plan["location"]), {})
-        shifts = [p for p in self.engine.plans(plan["session_id"]) if p["kind"] == "work" and p["status"] == "completed"
-                  and ((plan.get("routine_id") and p.get("routine_id") == plan["routine_id"]) or p["title"] == plan["title"])]
-        recent = [store.get("experience", p["experience_id"])["summary"][:100] for p in shifts[-3:]]
+        shifts = [p for p in self.engine.plans(plan["session_id"]) if p["kind"] == plan["kind"] and p["status"] == "completed"
+                  and p["session_id"] == plan["session_id"] and p.get("routine_id") == plan.get("routine_id")
+                  and (plan.get("routine_id") or p["title"] == plan["title"])]
+        last_scene = next((p["shift_scene"] for p in reversed(shifts) if (p.get("shift_scene") or {}).get("done")), {})
+        carry = last_scene.get("next_shift", "")
         offer = store.find("activity_memory", plan.get("continuation_id", ""))
         available = max(1, int((self.engine.time(plan["end"]) - now).total_seconds() / 60))
         prompt = (
@@ -97,9 +100,14 @@ class Continuity:
             f"班次={plan['title']}，地点={plan['location']}，缘由={plan['motivation']}，"
             f"地点说明={place.get('description', '')[:120]}；现在={now:%H:%M}，剩余{available}分钟；{background}；"
             f"零工约定={(offer or {}).get('next_action', '')[:160]}；"
-            f"之前上这班的经历={json.dumps(recent, ensure_ascii=False)}。"
+            f"本次类型={'课程或课题学习，按学生身份写课堂进度' if plan['kind'] == 'study' else '工作'}。"
+            f"上次已完成={last_scene.get('resolution', '')}；上次明确留给这次的事={carry or '无'}。"
+            "有遗留时从那个具体步骤往下做，resolution记下这次取得的进展。next_shift只写确实留给下次同一班或课的未完步骤，"
+            "多数时候填空字符串。办完就收尾，不为已交付的事再安排例行复核。"
         )
         scene = (await self.ask(prompt, ShiftScene, "班内情景")).model_dump()
+        if carry:
+            scene["carried_from"] = carry
         current = store.get("plan", plan["id"])
         if current["status"] != "active" or any(current[k] != plan[k] for k in ("kind", "title", "location", "start", "end")):
             return
@@ -198,8 +206,13 @@ class Continuity:
         else:
             prompt += ("从已有记录提取活动类别 activity 和具体对象 subject，输出这两个字段。"
                        "关联阶段目标时，依据现有结果返回goal_units（有实质进展为1，没有或未知为0）和next_action（依据现有记录提出下一步）。")
+        if enrich and plan.get("routine_id") and plan.get("shift_scene"):
+            prompt += ("本次课或班的收尾以现有经历为准。「下次接着做」已由课表或排班安排。"
+                       "另有明确的班外事项才填new_followup；班外带薪零工沿用next_action和hourly_pay。")
         try:
             result = await self.ask(prompt, ActivityOutcome if enrich else ActivityAssessment, "活动结果" if enrich else "习惯归类")
+            if enrich and plan.get("routine_id") and plan.get("shift_scene") and not result.hourly_pay:
+                result = result.model_copy(update={"next_action": result.new_followup.strip()})
             if enrich and continuation and result.completed:
                 following = result.new_followup if continuation.get("completed") else result.next_action
                 if following.strip() == continuation["next_action"].strip():

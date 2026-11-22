@@ -25,7 +25,8 @@ def work_now(plan, now):
     if not scene:
         return ""
     if scene["done"]:
-        return f"这班已经忙完{scene['task'].rstrip('。')}。{scene['resolution']}"
+        note = f"{scene['task'].rstrip('。')}。{scene['resolution']}"
+        return note + (" 下次接着做：" + scene["next_shift"] if scene.get("next_shift") else "")
     note = f"{scene['task'].rstrip('。')}。{scene['detail']}"
     if scene["situation"] == "受委屈":
         note += "心里有点委屈。"
@@ -44,7 +45,7 @@ def work_now(plan, now):
 def public_plan(plan):
     scene = plan.get("shift_scene")
     if scene and not scene["done"]:
-        return {**plan, "shift_scene": {k: v for k, v in scene.items() if k != "resolution"}}
+        return {**plan, "shift_scene": {k: v for k, v in scene.items() if k not in {"resolution", "next_shift"}}}
     return plan
 
 
@@ -584,6 +585,8 @@ class LifeEngine:
             record["details"].update(手头工作=scene["task"], 班内情况=scene["detail"])
             if scene["done"]:
                 record["details"]["事情的收尾"] = scene["resolution"]
+                if scene.get("next_shift"):
+                    record["details"]["下次接着做"] = scene["next_shift"]
         plan.update(status="completed", experience_id=record["id"])
         self.store.put("experience", record)
         self.wallet.settle(plan, now)

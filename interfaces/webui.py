@@ -579,11 +579,15 @@ class WebUI:
         scene = plan.get("shift_scene")
         if scene:
             detail = f"{scene['task'].rstrip('。')}。{scene['detail']}"
+            if scene.get("carried_from"):
+                detail = "接上次：" + scene["carried_from"] + "　" + detail
             if scene["deadline"]:
                 detail += f" 约好{self.engine.time(scene['deadline']):%H:%M}交付。"
-            rows.append({"at": scene["started_at"], "title": "手头的工作", "text": detail})
+            rows.append({"at": scene["started_at"], "title": "课上在做什么" if plan["kind"] == "study" else "手头的工作", "text": detail})
             if scene["done"]:
-                rows.append({"at": scene["finished_at"], "title": "工作收尾", "text": scene["resolution"]})
+                rows.append({"at": scene["finished_at"], "title": "这次课的进展" if plan["kind"] == "study" else "工作收尾", "text": scene["resolution"]})
+                if scene.get("next_shift"):
+                    rows.append({"at": scene["finished_at"], "title": "下次接着做", "text": scene["next_shift"]})
         labels = {"title": "活动", "start": "开始", "end": "结束", "location": "地点", "motivation": "缘由", "kind": "类型"}
         actions = {"cancel": "取消活动", "pause": "暂停活动", "resume": "继续活动", "record_completion": "确认完成"}
         for change in plan["changes"][-30:]:

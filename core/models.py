@@ -44,6 +44,7 @@ class ShiftScene(BaseModel):
     minutes: int = Field(ge=1)
     deadline_minutes: int | None = Field(default=None, ge=1, le=1440)
     resolution: str = Field(min_length=1, max_length=100)
+    next_shift: str = Field(default="", max_length=120)
 
 
 class PlanInput(BaseModel):

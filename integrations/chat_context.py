@@ -172,7 +172,24 @@ class ChatContext:
                                 if "手头工作" in e["details"] and
                                 0 <= (now - engine.time(e["occurred_at"])).total_seconds() < 3 * 3600), None)
             if recent_work:
-                work = "下班后的近况：" + (recent_work["details"].get("事情的收尾") or recent_work["summary"])
+                work = "刚才的进展：" + (recent_work["details"].get("事情的收尾") or recent_work["summary"])
+                if recent_work["details"].get("下次接着做"):
+                    work += "；下次接着做：" + recent_work["details"]["下次接着做"]
+        if any(word in text for word in ("后来", "上次", "昨天", "完了", "做完", "进展", "进度")):
+            finished = [r for r in reversed(engine.plans(session)) if r["status"] == "completed"
+                        and (r.get("shift_scene") or {}).get("done")
+                        and ("昨天" not in text or (now.date() - engine.time(r["end"]).date()).days == 1)]
+            related = next((r for r in finished if r["title"] in text), None)
+            if not related:
+                terms = re.findall(r"[\w]{2,}", re.sub(r"怎么样|做到哪里|后来|上次|昨天|做完|完了|进展|进度", " ", text))
+                related = next((r for r in finished if any(term in r["title"] or term in r["shift_scene"]["task"]
+                                                           for term in terms)), None)
+            if not related and finished and any(word in text for word in ("那件事", "那个后来", "上次课", "上个班")):
+                related = finished[0]
+            if related:
+                scene = related["shift_scene"]
+                add("上次进展", {"日期": related["end"][:10], "日程": related["title"],
+                               "做到哪里": scene["resolution"], "下次接着做": scene.get("next_shift", "")}, True)
         tone = []
         if state["energy"] <= 30:
             tone.append("累了，说话省力些")
@@ -184,7 +201,7 @@ class ChatContext:
             close = private and p.living.intimacy(session, self.speakers.get(session, "")) >= 2
             if stage == "回复":
                 tone.insert(0, "这是你自己的近况。对方问候时，用第一人称挑一件事随口聊一两句")
-            tone.append("对方关心时可以说说心里话" if close else "对方问起再简短聊工作")
+            tone.append("对方关心时可以说说心里话" if close else "对方问起再简短说说手头的事")
         if work or tone:
             add("work", "；".join(filter(None, [*tone, work])), True)
         if any(w in text for w in ("多少钱", "花了多少", "赚了多少", "挣了多少", "收支", "流水", "对账", "余额", "领了多少", "借款", "还款")):

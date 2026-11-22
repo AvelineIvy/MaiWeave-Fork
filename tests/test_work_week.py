@@ -6,8 +6,43 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from maiweave.core.models import Occupation, PlanInput, ShiftScene, WeeklyDuty
+from maiweave.core.models import ActivityOutcome, Occupation, PlanInput, ShiftScene, WeeklyDuty
 from test_plugin import plugin
+
+
+async def test_weekly_class_handoff(plugin, monkeypatch):
+    p = plugin
+    first = p.engine.time(p.engine.state()["updated_at"])
+    scene = ShiftScene(task="比较两次观测", situation="日常", detail="核对第一张图", minutes=5,
+                       resolution="第一张图已经画好", next_shift="补画第二张图")
+    ask = AsyncMock(return_value=scene)
+    monkeypatch.setattr(p.continuity, "ask", ask)
+    for day, rule, expected in [(0, "周三组会", ""), (1, "另一门课", ""), (7, "周三组会", "补画第二张图"), (14, "周三组会", "")]:
+        start = first + timedelta(days=day)
+        end = start + timedelta(hours=1)
+        plan = p.engine.create_plan(PlanInput(title="进度讨论", kind="study", start=start.isoformat(), end=end.isoformat()), "a", start)
+        with p.store.db:
+            p.store.put("plan", {**plan, "routine_id": rule})
+        now = start + timedelta(minutes=1)
+        monkeypatch.setattr(p, "now", lambda: now)
+        p.engine.advance(now)
+        if day:
+            ask.return_value = scene.model_copy(update={"resolution": "图已交付", "next_shift": ""})
+        await p.continuity.start_shift(p.store.get("plan", plan["id"]), now)
+        current = p.store.get("plan", plan["id"])["shift_scene"]
+        assert current.get("carried_from", "") == expected
+        assert "next_shift" not in p.engine.snapshot("a", now)["current"]["shift_scene"]
+        now = end
+        p.engine.advance(now)
+        assert not p.store.find("payment", "工钱:" + plan["id"])
+        assert "上次进展" in p.context_text("a", "", "上次进度讨论怎么样")
+        assert "上次进展" not in p.context_text("b", "", "上次进度讨论怎么样")
+        if not day:
+            ask.return_value = ActivityOutcome(activity="组会", subject="对比图", summary="第一张图已完成",
+                                              details={}, enjoyment=1, next_action="下回再把第二张图补上",
+                                              importance=3, score_reason="课上取得进展")
+            await p.continuity.reflect(plan["id"], now)
+            assert not p.store.all("activity_memory")[-1]["next_action"]
 
 
 @pytest.mark.parametrize(("identity", "lesson"), [
