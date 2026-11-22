@@ -94,6 +94,9 @@ async def test_chat_moments_keep_stream_ownership_and_budget(plugin):
     p.ctx.llm.generate.return_value = {'success': True, 'response': json.dumps({'moments': [{'source_ids': ['chat-1'], 'summary': '聊了近况', 'public_summary': ''}]})}
     rows = await p.diary.chat_moments(now.date(), now, {'经历': []})
     assert rows[0]['session_id'] == 'a'
+    prompt = p.ctx.llm.generate.call_args.args[0]
+    assert "素材编号" in prompt and "message_id" not in prompt and "session_id" not in prompt
+    assert rows[0]["sources"][0]["messages"][0]["message_id"]
     assert len(p.ctx.llm.generate.call_args.args[0]) < 12000
     p.ctx.llm.generate.return_value = {'success': True, 'response': json.dumps({'moments': [{'source_ids': ['chat-1', 'chat-2'], 'summary': '混合', 'public_summary': ''}]})}
     with pytest.raises(ValueError, match='同一聊天流'):

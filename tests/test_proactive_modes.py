@@ -171,24 +171,52 @@ async def test_mode_switch_waits_for_accepted_natural_request(plugin, monkeypatc
     assert "等待回执" in plugin.living.share_decisions[0]["reason"]
 
 
-@pytest.mark.parametrize("old_version", ["0.6.0", "0.8.0", "0.8.4", "0.11.2"])
+@pytest.mark.parametrize("old_version", ["0.6.0", "0.8.0", "0.8.4", "0.11.2", "0.12.6"])
 def test_mode_config_upgrade_keeps_saved_values(old_version):
     """使用 SDK 升级配置，保留用户设置并补齐交流模式。"""
     from copy import deepcopy
     from maibot_sdk.config import rebuild_plugin_config_data
     instance = create_plugin()
     defaults = instance.get_default_config()
-    assert defaults["plugin"]["config_version"] == "0.12.6"
+    assert defaults["plugin"]["config_version"] == "0.12.7"
     previous = deepcopy(defaults)
     previous["plugin"]["config_version"] = old_version
     previous["proactive"].pop("mode")
+    previous["proactive"].pop("group_enabled")
+    previous["life"].pop("sleep_skip_group_planner")
     previous["proactive"].update(enabled=True, daily_limit=7, cooldown_minutes=45, session_ids=["chat-a"], share_threshold=6)
     previous["life"].update(timezone="Asia/Tokyo", interests=["画画"], autonomous=False)
     expected = deepcopy(previous)
-    expected["plugin"]["config_version"] = "0.12.6"
+    expected["plugin"]["config_version"] = "0.12.7"
     expected["proactive"]["mode"] = "自然交流"
+    expected["proactive"]["group_enabled"] = True
+    expected["life"]["sleep_skip_group_planner"] = False
     upgraded = rebuild_plugin_config_data(defaults, previous)
     instance.set_plugin_config(upgraded)
     assert instance.get_plugin_config_data() == expected
     upgraded["proactive"]["mode"] = "主动表达"
     assert rebuild_plugin_config_data(defaults, upgraded)["proactive"]["mode"] == "主动表达"
+
+
+@pytest.mark.parametrize("mode", ["主动表达", "自然交流"])
+async def test_proactive_private_only(plugin, monkeypatch, mode):
+    now = prepare(plugin, monkeypatch)
+    cfg = plugin.config.proactive
+    cfg.mode, cfg.group_enabled, cfg.session_ids = mode, False, ["group", "chat-a"]
+    plugin.ctx.chat.get_all_streams.return_value = [
+        {"stream_id": "group", "is_group_session": True}, {"stream_id": "chat-a", "platform": "qq"}]
+    await plugin.living.share(now)
+    assert {row["session"] for row in plugin.store.all("share_receipt")} == {"chat-a"}
+    assert any(r["session"] == "group" and "仅发往" in r["reason"] for r in plugin.living.share_decisions)
+
+
+async def test_private_only_skips_group_image_waiting_for_delivery(plugin):
+    plugin.config.proactive.group_enabled = False
+    plugin.config.diary.chat_images_enabled = True
+    plugin.ctx.chat.get_all_streams.return_value = [{"stream_id": "group", "group_id": "example"}]
+    with plugin.store.db:
+        plugin.store.put("share_receipt", {"id": "example", "session": "group",
+            "image_requested": True, "outcome": "实际已发送"})
+    plugin.living.images.send = AsyncMock()
+    await plugin.living.share_images(plugin.now())
+    plugin.living.images.send.assert_not_awaited()

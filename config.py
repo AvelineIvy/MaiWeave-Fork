@@ -22,7 +22,7 @@ def setting(label: str, **kwargs):
 
 class PluginSection(PluginConfigBase):
     __ui_label__ = "插件信息"
-    config_version: str = setting("配置版本", default="0.12.6", description="配置结构变更时更新。当前安装的插件版本见页面顶部。", json_schema_extra={"disabled": True})
+    config_version: str = setting("配置版本", default="0.12.7", description="配置结构变更时更新。当前安装的插件版本见页面顶部。", json_schema_extra={"disabled": True})
 
 
 class LifeConfig(PluginConfigBase):
@@ -41,6 +41,7 @@ class LifeConfig(PluginConfigBase):
     model_task: str = setting("默认生活模型（必填）", default="utils", description="从 MaiBot 已配置的模型任务中选择，默认 utils；任务选项在插件加载时更新。")
     schedule_enabled: bool = setting("遵循日常作息", default=True, description="关闭后切换为全天候模式，已有约定继续执行。")
     nap_quiet: bool = setting("午睡期间保持安静", default=True, description="日间睡眠时保持安静，醒来后接上当前话题。日间按入睡与起床时间之外判断；关闭后可在日间睡眠时回复，唤醒沿用现有设置。")
+    sleep_skip_group_planner: bool = setting("睡眠时普通群聊跳过 Planner", default=False, description="睡眠静默期间跳过普通群消息和宿主聊天历史。关键词唤醒后正常接话。")
     sleep_skip_private_planner: bool = setting("睡眠时普通私聊跳过 Planner", default=False, description="收到普通私聊时先检查唤醒条件。仍在睡眠静默时，本条消息跳过模型判断，也不进入 MaiBot 聊天历史。")
     wake_enabled: bool = setting("允许聊天唤醒", default=True, description="聊天唤醒总开关。普通私聊按下方概率唤醒；亲密人物可通过关键词或当前陪伴请求唤醒，群聊和私聊共用人物关系。")
     private_wake_probability: int = setting("私聊消息唤醒概率（%）", default=0, ge=0, le=100, description="开启聊天唤醒后，睡眠静默期间每轮普通私聊按此概率醒来。0 为关闭，100 为每轮都会醒来；午睡和夜间共用，醒来后沿用清醒时长。")
@@ -60,6 +61,7 @@ class ProactiveConfig(PluginConfigBase):
     __ui_label__ = "主动交流"
     enabled: bool = setting("启用主动交流", default=False, description="根据重要经历请求 MaiBot 主动开口")
     mode: Literal["自然交流", "主动表达"] = setting("主动交流模式", default="自然交流", description="生活经历先结合最近聊天和已发送内容判断是否值得分享。自然交流再交给 Planner 决定是否开口；主动表达由 Replyer 围绕选定话题生成并发送。", json_schema_extra={"choices": ["自然交流", "主动表达"]})
+    group_enabled: bool = setting("允许群聊主动交流", default=True, description="关闭后只向已选的私聊主动发送。群里的定时分享、问候、提醒和抓包接话一并关闭。")
     natural_greetings: bool = setting("作息问候", default=False, description="随角色起床和睡前安排问候，使用所选主动交流模式。共用发送额度和间隔，群聊在近期互动后道晚安。")
     session_ids: list[str] = setting("额外接收聊天流（选填）", default_factory=list, description="个人资料中选择的聊天流自动用于主动交流和纪念日提醒。这里填写额外的群聊或其他聊天流；可发送 /maiweave 获取 ID。")
     share_threshold: int = setting("经历分享最低分", default=5, ge=1, le=10, description="普通、熟悉关系及群聊按此分数筛选经历；亲近私聊也会考虑3分及以上、有具体细节的日常小事。模型每轮选一件或等待。生日祝福、约定提醒按各自时间触发。", json_schema_extra={"choices": list(range(1, 11))})

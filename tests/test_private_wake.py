@@ -125,6 +125,8 @@ async def test_keyword_still_requires_intimacy_with_probability_off(plugin):
 def test_default_and_schema(plugin):
     defaults=plugin.get_default_config()
     assert defaults["life"]["sleep_skip_private_planner"] is False
+    assert defaults["life"]["sleep_skip_group_planner"] is False
+    assert "sleep_skip_group_planner" in plugin.get_webui_config_schema()["sections"]["sleep"]["fields"]
     assert "sleep_skip_private_planner" in plugin.get_webui_config_schema()["sections"]["sleep"]["fields"]
     assert defaults["life"]["private_wake_probability"]==0
     assert type(plugin.config.life).model_fields["private_wake_probability"].json_schema_extra["label"]=="私聊消息唤醒概率（%）"
@@ -144,6 +146,29 @@ async def test_private_sleep_gate(plugin, hour, nap, schedule, enabled, expected
     assert ("private" in plugin.chat_context.messages) == (expected == "continue")
     assert (await receive(plugin, group=True))["action"] == "continue"
     assert (await receive(plugin, "/help"))["action"] == "continue"
+
+
+@pytest.mark.parametrize("hour,nap,schedule,expected", [
+    (23, False, True, "abort"), (14, True, True, "abort"),
+    (14, False, True, "continue"), (23, True, False, "continue")])
+async def test_group_sleep_gate(plugin, hour, nap, schedule, expected):
+    prepare(plugin, hour)
+    plugin.config.life.sleep_skip_group_planner = True
+    plugin.config.life.nap_quiet = nap
+    plugin.config.life.schedule_enabled = schedule
+    assert (await receive(plugin, group=True))["action"] == expected
+    assert (await receive(plugin, "/help", group=True))["action"] == "continue"
+    assert (await receive(plugin))["action"] == "continue"
+
+
+async def test_group_keyword_wakes_before_gate(plugin):
+    now = prepare(plugin, probability=0)
+    plugin.config.life.sleep_skip_group_planner = True
+    person = plugin.anniversaries.save_profile("聊天对象", "private", "u")
+    with plugin.store.db:
+        plugin.store.put("profile", {**person, "intimacy": 3, "intimacy_mode": "manual"})
+    assert (await receive(plugin, "陪陪我", group=True))["action"] == "continue"
+    assert plugin.living.awake_until(now)
 
 
 @pytest.mark.parametrize("keyword", [True, False])

@@ -971,7 +971,8 @@ class Living:
             self.share_decisions.appendleft({"created": now.isoformat(), "at": now.strftime("%m-%d %H:%M:%S"), "session": session,
                                              "outcome": outcome, "reason": reason, "score": score, "mode": config.mode})
 
-        await self.share_images(now)
+        private_sessions = None if config.group_enabled else await self.private_share_sessions()
+        await self.share_images(now, private_sessions)
         greeting_window = self.greetings.window(now)
         ordinary_hours = in_hours(now.hour, config.start_hour, config.end_hour)
         if not ordinary_hours and not greeting_window:
@@ -986,6 +987,9 @@ class Living:
         if not sessions:
             record("跳过", "请在个人资料或额外接收列表中选择聊天流")
         for session in sessions:
+            if private_sessions is not None and session not in private_sessions:
+                record("跳过", "主动交流仅发往已选的私聊", session)
+                continue
             presence = self.presence.targets(session, now)
             if presence and all(p["status"] in {"准备睡觉", "忙碌", "外出"} and not p["active_here"] for p in presence):
                 streams = await self.ctx.chat.get_all_streams(platform="all_platforms")
@@ -1188,13 +1192,21 @@ class Living:
                     raise
                 self.receipts.accept(result["task_id"], row, now)
             self.settle_shares()
-            await self.share_images(now)
+            await self.share_images(now, private_sessions)
 
 
-    async def share_images(self, now):
+    async def private_share_sessions(self):
+        streams = await self.ctx.chat.get_all_streams(platform="all_platforms")
+        return {s["stream_id"] for s in streams if not (s.get("group_id") or s.get("is_group_session"))}
+
+    async def share_images(self, now, private_sessions=None):
         if not self.config.diary.chat_images_enabled or not hasattr(self, "images"):
             return
+        if not self.config.proactive.group_enabled and private_sessions is None:
+            private_sessions = await self.private_share_sessions()
         for row in self.engine.store.all("share_receipt"):
+            if private_sessions is not None and row["session"] not in private_sessions:
+                continue
             if not row.get("image_requested") or row.get("image_delivery") or row["outcome"] != "实际已发送":
                 continue
             row["image_delivery"] = "发送中"

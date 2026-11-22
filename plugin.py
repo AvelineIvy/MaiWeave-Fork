@@ -115,7 +115,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         groups = [
             ("life", "life", "生活开关", "控制生活推进与自主活动。", ["enabled", "autonomous"]),
             ("profile", "life", "角色设定", "设定麦麦的身份、生活背景和兴趣。", ["timezone", "occupation", "interests", "background"]),
-            ("sleep", "life", "日常作息", "关闭作息可全天候交流；开启后按 24 小时制安排睡眠。", ["schedule_enabled", "nap_quiet", "sleep_skip_private_planner", "sleep_hour", "wake_hour"]),
+            ("sleep", "life", "日常作息", "关闭作息可全天候交流；开启后按 24 小时制安排睡眠。", ["schedule_enabled", "nap_quiet", "sleep_skip_private_planner", "sleep_skip_group_planner", "sleep_hour", "wake_hour"]),
             ("wake", "life", "睡眠唤醒", "设置私聊唤醒概率、唤醒词语和醒来后留给聊天的时间。", ["wake_enabled", "private_wake_probability", "wake_minutes", "wake_keywords"]),
             ("economy", "life", "经济设置", "设置麦麦的存款、货币和每月账单。", ["opening_balance", "currency_name", "monthly_rent", "monthly_utilities", "rent_day"]),
             ("planning", "life", "更新与规划", "设置生活推进和自主规划的检查间隔。", ["tick_seconds", "planning_interval_minutes"]),
@@ -123,7 +123,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
             ("explore", "world", "自主见闻", "安排时间了解感兴趣的事，再把发现带回生活。", ["explore_enabled", "explore_topics", "explore_daily_limit", "explore_interval_minutes"]),
             ("news", "world", "资讯订阅", "按需开启；订阅地址需要自行提供。", ["news_enabled", "feed_urls"]),
             ("search", "world", "联网搜索", "复用 MaiBot 已配置的搜索服务。", ["search_enabled", "places_enabled"]),
-            ("proactive", "proactive", "主动交流对象", "个人资料的聊天流用于交流和提醒；其他接收对象可在下方补充。", ["enabled", "mode", "natural_greetings", "session_ids", "share_threshold"]),
+            ("proactive", "proactive", "主动交流对象", "个人资料的聊天流用于交流和提醒；其他接收对象可在下方补充。", ["enabled", "group_enabled", "mode", "natural_greetings", "session_ids", "share_threshold"]),
             ("limits", "proactive", "交流时段与间隔", "发送间隔从实际发送计算，同一话题未发出时按重新判断间隔选择时机。", ["start_hour", "end_hour", "cooldown_minutes"]),
             ("quota", "proactive", "每日发送额度", "每日额度是最多发送次数，分享内容来自生活经历和待跟进事项。", ["daily_limit"]),
         ]
@@ -728,6 +728,14 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         self.chat_context.speakers[message["session_id"]] = message.get("message_info", {}).get("user_info", {}).get("user_id", "")
         if not re.fullmatch(r"/(?:maiweave|织生活)(?:\s+状态)?", (message.get("processed_plain_text") or "").strip()):
             await self.identify_person(message["session_id"], message.get("message_info", {}).get("user_info", {}).get("user_id", ""), message.get("platform", ""))
+            self.chat_context.wake_candidates.pop(message["session_id"], None)
+            handled_wake = self.living.wake_for_message(message.get("processed_plain_text") or "", message["session_id"], self.now(),
+                                         message.get("message_info", {}).get("user_info", {}).get("user_id", ""))
+            text = (message.get("processed_plain_text") or "").strip()
+            session = message["session_id"]
+            if (self.chat_context.kinds[session] == "group" and self.config.life.sleep_skip_group_planner
+                    and not text.startswith("/") and self.living.quiet_sleep(self.now(), session)):
+                return {"action": "abort"}
             if self.config.life.enabled:
                 if not (message.get("processed_plain_text") or "").strip().startswith("/"):
                     self.chat_schedule.mark(message["session_id"], self.now(), self.chat_context.speakers[message["session_id"]])
@@ -737,11 +745,6 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
                 self.presence.receive(message["session_id"], message.get("message_info", {}).get("user_info", {}).get("user_id", ""),
                                       message.get("processed_plain_text") or "", observed_at)
                 await self.presence.observe_group(message, observed_at)
-            self.chat_context.wake_candidates.pop(message["session_id"], None)
-            handled_wake = self.living.wake_for_message(message.get("processed_plain_text") or "", message["session_id"], self.now(),
-                                         message.get("message_info", {}).get("user_info", {}).get("user_id", ""))
-            text = (message.get("processed_plain_text") or "").strip()
-            session = message["session_id"]
             if self.chat_context.kinds[session] == "private" and not text.startswith("/"):
                 now = self.now()
                 if self.config.life.sleep_skip_private_planner and self.living.quiet_sleep(now, session):
@@ -776,7 +779,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         activity = current["title"] if current and self.engine.visible(current, session) else "正在处理其他安排" if current else "空闲"
         state = self.engine.state()
         message = (
-            f"MaiWeave 0.12.6\n启用：{self.config.life.enabled}\n当前：{activity}\n"
+            f"MaiWeave 0.12.7\n启用：{self.config.life.enabled}\n当前：{activity}\n"
             f"精力：{state['energy']:.0f}；饥饿：{state['hunger']:.0f}；心情：{state['mood']:.0f}\n"
             f"聊天流：{session}\n原生记忆连接：{'已配置' if self.config.memory.enabled else '未配置'}\n"
             f"最近运行错误：{self.last_error or '无'}"

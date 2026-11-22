@@ -92,7 +92,7 @@ class Presence:
             await receipts.refresh(now)
         info = message.get("message_info", {})
         text = (message.get("processed_plain_text") or "").strip()
-        if not info.get("group_info") or not text or text.startswith("/") or not self.living.config.proactive.enabled:
+        if not info.get("group_info") or not text or text.startswith("/") or not self.living.config.proactive.enabled or not self.living.config.proactive.group_enabled:
             return
         user = str(info.get("user_info", {}).get("user_id", ""))
         person = self.living.person_key(message["session_id"], user)
@@ -122,6 +122,8 @@ class Presence:
                 self.store.put("share_receipt", row)
 
     def opportunities(self, session, user, now):
+        if not self.living.config.proactive.group_enabled:
+            return []
         result = []
         for category in ("person_state", "share_receipt"):
             for row in self.store.all(category):
