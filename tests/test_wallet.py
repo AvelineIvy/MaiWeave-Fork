@@ -143,6 +143,39 @@ async def test_private_loan_to_wages_and_repayment(plugin, monkeypatch, mode):
     assert returned["session"] == "chat-a" and "还清" in returned["topic"]
 
 
+async def test_two_lenders_repaid_in_deposit_order(plugin):
+    w, store, now = plugin.engine.wallet, plugin.store, plugin.now()
+    # 甲先申请，乙先到账。两笔借款都从原私聊确认。
+    w.set_opening(0)
+    w.need("画布", 20, "甲", now - timedelta(days=1))
+    first, = w.pending(now - timedelta(days=1))
+    w.notice(first, "甲", "甲")
+    w.respond(first["id"], "甲", "甲", "promise", now - timedelta(days=1))
+    # 独立的第二笔申请先收到钱。
+    second = {**first, "id": "乙的申请", "date": now.date().isoformat(), "source_session": "乙",
+              "session": "乙", "user": "乙", "title": "花纸", "price": 12, "amount": 12}
+    with store.db:
+        store.put("money_request", second)
+    w.respond("乙的申请", "乙", "乙", "lend", now)
+    with store.db:
+        w._post("消费:花纸", -12, "花纸", now, "乙")
+    w.respond(first["id"], "甲", "甲", "lend", now + timedelta(minutes=1))
+    with store.db:
+        store.put("experience", {"id": "书店班", "details": {}})
+        shift = {"id": "书店班", "experience_id": "书店班", "title": "值班工钱", "pay": 19}
+        w.settle(shift, now + timedelta(hours=1))
+        w.settle(shift, now + timedelta(hours=1))
+    assert store.get("money_request", "乙的申请")["owed"] == 0
+    assert store.get("money_request", first["id"])["owed"] == 13
+    assert [r["amount"] for r in w.recent_payments("", "")] == [19]
+    progress = {"record_id": "installment:13:" + first["id"], "session": "甲"}
+    assert w.current_notice(progress, now)
+    assert not w.current_notice({**progress, "session": "乙"}, now)
+    with store.db:
+        w.settle({**shift, "id": "第二班", "pay": 13}, now + timedelta(hours=3))
+    assert not w.current_notice(progress, now)
+
+
 async def test_paid_opportunity_uses_saved_place_and_experience(plugin, monkeypatch):
     p = plugin
     now = p.now().replace(hour=12, minute=0, second=0, microsecond=0) + timedelta(days=1)

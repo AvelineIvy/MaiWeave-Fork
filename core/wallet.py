@@ -170,9 +170,13 @@ class Wallet:
         amount = plan.get("pay", 0)
         if amount and self._post("工钱:" + plan["id"], amount, plan["title"], now, plan.get("session_id", "")):
             available = min(amount, self.account()["balance"])
-            for request in self.store.all("money_request"):
-                if request["status"] != "借入" or available <= 0:
-                    continue
+            debts = [r for r in self.store.all("money_request") if r["status"] == "借入"]
+            def received_at(row):
+                payment = self.store.find("payment", "来款:" + row["id"])
+                return payment["at"] if payment else row["date"]
+            for request in sorted(debts, key=received_at):
+                if available <= 0:
+                    break
                 paid = min(request["owed"], available)
                 self._post("还款:" + plan["id"] + ":" + request["id"], -paid, "归还借款 · " + request["title"], now, request["session"], request["user"])
                 request["owed"] -= paid
@@ -247,6 +251,10 @@ class Wallet:
 
     def current_notice(self, receipt, now):
         key = receipt.get("record_id", "")
+        if key.startswith("installment:"):
+            _, remaining, loan_id = key.split(":", 2)
+            loan = self.store.find("money_request", loan_id)
+            return bool(loan and loan["session"] == receipt["session"] and str(loan["owed"]) == remaining)
         if not key.startswith("wallet:"):
             return True
         request = self.store.get("money_request", key.split(":", 1)[1])

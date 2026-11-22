@@ -994,8 +994,13 @@ class Living:
                     if notice:
                         notices.append(notice)
             for request in engine.store.all("money_request"):
-                if request["status"] == "已还清" and request["session"] == session:
-                    notices.append(("repayment:" + request["id"], f"工钱已经到账，也还清了为「{request['title']}」借的{request['amount']}{wallet.currency_name}，向对方报个信。", None))
+                if request["session"] != session:
+                    continue
+                amount, owed = request["amount"], request["owed"]
+                if request["status"] == "已还清":
+                    notices.append(("repayment:" + request["id"], f"工钱到账啦，为「{request['title']}」向你借的{amount}{wallet.currency_name}已经还清了。", None))
+                elif request["status"] == "借入" and 0 < owed < amount:
+                    notices.append((f"installment:{owed}:{request['id']}", f"为「{request['title']}」向你借的{amount}{wallet.currency_name}，已经还了{amount-owed}，还欠你{owed}。", None))
             for item in Anniversaries(engine.store).upcoming(now.date(), session):
                 if item["enabled"] and item["days_left"] == 0:
                     notices.append((f"anniversary:{item['id']}:{item['next_date']}",
@@ -1081,7 +1086,7 @@ class Living:
             record_id = notices[0][0] if notices else event["id"]
             topic = "经历分享"
             if notices:
-                topics = {"wallet": "借生活费", "repayment": "归还生活费", "anniversary": "纪念日", "reminder": "共同安排提醒", "confirmation": "安排确认",
+                topics = {"wallet": "借生活费", "repayment": "归还生活费", "installment": "归还生活费", "anniversary": "纪念日", "reminder": "共同安排提醒", "confirmation": "安排确认",
                           "thread": "话题跟进", "issue": "日程调整", "greeting": greeting["kind"] if greeting else "作息问候"}
                 topic = topics[record_id.split(":", 1)[0]]
                 score = f"本次处理{topic}"

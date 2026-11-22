@@ -523,6 +523,12 @@ class WebUI:
         end = start + timedelta(days=1)
         plans = self.store.all("plan", omit=("changes",))
         data.update(self.wallet_summary())
+        unnamed = [loan for loan in data["loans"] if loan.get("user") and not loan["lender"]]
+        if unnamed:
+            streams = {s["stream_id"]: s for s in await self.ctx.chat.get_all_streams(platform="all_platforms")}
+            for loan in unnamed:
+                peer = streams.get(loan["session"], {})
+                loan["lender"] = peer.get("user_cardname") or peer.get("user_nickname") or ""
         data["map"] = self.life_map(sorted(plans, key=lambda p: self.engine.time(p["start"])))
         daily = sorted((p for p in plans if p["status"] != "cancelled" and self.engine.time(p["start"]) < end
                         and self.engine.time(p["end"]) > start), key=lambda p: self.engine.time(p["start"]))
@@ -807,8 +813,10 @@ class WebUI:
         return {**self.life_map(plans), **self.wallet_summary()}
 
     def wallet_summary(self):
-        loans = self.store.all("money_request")[-10:]
+        loans = sorted(self.store.all("money_request"), key=lambda r: bool(r.get("owed")))[-10:]
+        names = {(p["session_id"], p["user_id"]): p["name"] for p in self.store.all("profile") if p.get("user_id")}
         for loan in loans:
+            loan["lender"] = names.get((loan["session"], loan["user"]), "")
             if loan["status"] == "待询问" and loan["session"]:
                 sent = self.store.find("sharing", loan["session"]) or {}
                 if "wallet:" + loan["id"] in sent.get("notice_ids", []):

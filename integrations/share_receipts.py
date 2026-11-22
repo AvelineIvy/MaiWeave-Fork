@@ -109,7 +109,7 @@ class ShareReceipts:
             self.store.put("share_receipt", row)
         stage = "生成失败"
         try:
-            if row["record_id"].startswith("wallet:"):
+            if row["record_id"].startswith(("wallet:", "repayment:", "installment:")):
                 text = row["topic"]
             else:
                 context = await self.recent_chat(session)
