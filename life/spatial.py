@@ -48,6 +48,20 @@ class Spatial:
                                         "minutes": 2, "mode": "步行", "fare": 0})
                 store.put("runtime", {"id": "neighborhood_shop", "place_id": shop["id"]})
 
+        if not store.find("runtime", "neighborhood_dining") and store.find("place", "street"):
+            with store.db:
+                places = store.all("place")
+                for name, kinds, description, minutes in [
+                    ("街口早餐铺", ("早餐", "早点"), "早上卖包子、粥和豆浆，适合坐下吃或顺路带走。", 3),
+                    ("街坊小饭馆", ("饭馆", "餐馆", "家常菜", "面馆", "餐厅"), "午晚餐有面条、盖饭和家常小炒，可以堂食。", 6),
+                ]:
+                    if any(p["name"] == name or (not p.get("city_key") and
+                           any(k in p["name"] or k in p.get("category", "") for k in kinds)) for p in places):
+                        continue
+                    place = self.save_place(name, False, description)
+                    self.save_route("street", place["id"], minutes, "步行")
+                store.put("runtime", {"id": "neighborhood_dining"})
+
     def place(self, name: str) -> dict:
         place = next((p for p in self.engine.store.all("place") if name in {p["id"], p["name"]}), None)
         if place is None:
@@ -102,8 +116,10 @@ class Spatial:
             self.engine.store.put("route", record)
         return record
 
-    def route(self, origin: str, destination: str, *, budget: int | None = None) -> dict:
-        start, end = self.place(origin), self.place(destination)
+    def routes_from(self, origin: str, *, budget: int | None = None):
+        """按用时从短到长列出可达路线，地图规划和单次寻路共用。"""
+        start = self.place(origin)
+        names = {p["id"]: p["name"] for p in self.engine.store.all("place")}
         graph = {}
         for edge in self.engine.store.all("route"):
             for a, b in [(edge["origin"], edge["destination"]), (edge["destination"], edge["origin"])]:
@@ -114,17 +130,24 @@ class Spatial:
             minutes, _, node, spent, legs = heapq.heappop(queue)
             if node in cheapest and (budget is None or cheapest[node] <= spent):
                 continue
+            first = node not in cheapest
             cheapest[node] = spent
-            if node == end["id"]:
-                return {"origin": start["name"], "destination": end["name"], "minutes": minutes, "legs": legs}
+            if first:
+                yield {"origin": start["name"], "destination": names[node], "minutes": minutes, "legs": legs}
             for target, duration, mode, fare in graph.get(node, []):
                 if budget is None or spent + fare <= budget:
-                    leg = {"origin": self.place(node)["name"], "destination": self.place(target)["name"], "minutes": duration, "mode": mode}
+                    leg = {"origin": names[node], "destination": names[target], "minutes": duration, "mode": mode}
                     if fare:
                         leg["fare"] = fare
                     heapq.heappush(queue, (minutes + duration, next(serial), target, spent + fare, legs + [leg]))
+
+    def route(self, origin: str, destination: str, *, budget: int | None = None) -> dict:
+        end = self.place(destination)["name"]
+        for route in self.routes_from(origin, budget=budget):
+            if route["destination"] == end:
+                return route
         if budget is not None:
-            raise ValueError(f"存款 {budget} {self.engine.wallet.currency_name}，不够支付从{start['name']}到{end['name']}的车费")
+            raise ValueError(f"存款 {budget} {self.engine.wallet.currency_name}，不够支付从{self.place(origin)['name']}到{end}的车费")
         raise ValueError("地点之间没有连通路线，请先补充路线")
 
     def travel_route(self, origin, destination):

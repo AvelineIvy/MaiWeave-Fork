@@ -41,6 +41,7 @@ dialog{top:calc(var(--maibot-viewport-top,0px) + 88px);bottom:auto;margin:0 auto
 .feel{margin:6px 0 0;padding:7px 0 0;justify-content:flex-start;flex-wrap:wrap;gap:4px 10px;font-size:13px}.feel strong{font-size:14px}.feel small{margin-left:auto}
 .wallet{margin-top:12px;padding:14px;border:1px solid var(--line);border-radius:10px;background:color-mix(in srgb,var(--accent) 5%,var(--card))}
 .wallet h3,.wallet h4{margin:0}.wallet h3{font-size:17px}.wallet b{font-size:26px;color:var(--accent);font-variant-numeric:tabular-nums}
+.pantry-stock{margin-top:8px;gap:6px 12px;flex-wrap:wrap;font-size:13px}.pantry-stock span{font-variant-numeric:tabular-nums}
 .ledger{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:12px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
 .ledger h4{font-size:13px}.ledger ul{padding:0;margin:5px 0 0;list-style:none;max-height:4.8rem;line-height:1.45;overflow-y:auto;overscroll-behavior-y:contain;scrollbar-width:thin;font-size:13px;overflow-wrap:anywhere}.ledger li+li{border-top:1px solid var(--line);margin-top:4px;padding-top:4px}
 .ledger:not(:has(>div:not([hidden]))){display:none}
@@ -78,6 +79,7 @@ dialog{top:calc(var(--maibot-viewport-top,0px) + 88px);bottom:auto;margin:0 auto
 <section class="card"><div class="section-title"><h2>麦麦的近况</h2><small id="sleepMode"></small></div><div class="vitals" id="vitals"></div><div class="feel"><span>心情 · <strong id="moodLabel"></strong></span><b id="moodValue"></b><small id="sleepDebt"></small></div>
 <section class="wallet"><div class="between"><h3>存款</h3><span><b id="walletBalance"></b> <span id="walletUnit"></span></span></div>
 <p id="rentNote" hidden></p>
+<div class="between pantry-stock"><h4>麦麦的冰箱</h4><span id="pantryStock"></span></div>
 <div class="ledger"><div><h4>最近收支</h4><ul id="paymentList" aria-label="最近收支" tabindex="0"></ul></div><div><h4>私聊借还</h4><ul id="loanList" aria-label="私聊借还" tabindex="0"></ul></div></div></section></section>
 <section class="card wide"><div class="section-title"><h2>生活地图</h2><button class="btn" data-page="space">管理地点与路线 →</button></div>
 <div class="map-layout"><div class="map-board" id="mapBoard" role="group" aria-label="生活地点"></div>
@@ -198,6 +200,8 @@ function paintMap(map,unit){
   ['医院','🏥',45,39,p=>/医院|诊所|卫生院/.test(p.name)],
   ['图书馆','📚',61,38,p=>/图书馆|书屋|书店/.test(p.name)],
   ['便利店','🏪',94,14,p=>/便利店|便利商店/.test(p.name)],
+  ['早餐铺','🥟',85,23,p=>/早餐|早点/.test(p.name)],
+  ['小饭馆','🍜',88,68,p=>/饭馆|餐馆|面馆|家常菜|餐厅/.test(p.name)],
   ['超市','🛒',70,55,p=>/超市|生鲜店/.test(p.name)],
   ['公交站','🚌',57,56,p=>/公交|巴士站/.test(p.name)],
   ['花店','🌷',56,70,p=>/花店|花房|花艺/.test(p.name)],
@@ -407,6 +411,7 @@ function paintWallet(d){
  const unit=d.currency_name;
  $('walletUnit').textContent=unit;
  $('walletBalance').textContent=d.wallet.balance;
+ $('pantryStock').textContent=d.pantry ? `食材够 ${d.pantry.raw} 餐 · 做好的饭 ${d.pantry.ready} 餐` : '';
  $('rentNote').textContent=d.rent;$('rentNote').hidden=!d.rent;
  const entries=d.payments.map(r=>`<li>${esc(r.at.slice(5,16).replace('T',' '))} · ${esc(r.title)} <span style="white-space:nowrap">${r.amount>0?'+':''}${r.amount} ${esc(unit)}</span></li>`);
  const loans=d.loans.slice().reverse().map(r=>{

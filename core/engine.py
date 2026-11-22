@@ -197,7 +197,7 @@ class LifeEngine:
         self._check_interval(start, end, {record_id, plan.get("travel_id", "")})
         updated.update(start=start.isoformat(), end=end.isoformat())
         if updated["kind"] != plan["kind"]:
-            updated.update(pay=0, cost=0, hourly_pay=0, purchase_request="")
+            updated.update(pay=0, cost=0, hourly_pay=0, purchase_request="", groceries=0, food="")
             if updated["kind"] not in {"study", "leisure"}:
                 updated.update(book_id="", research_query="")
         elif updated.get("hourly_pay"):

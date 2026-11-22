@@ -92,6 +92,8 @@ class ExperienceInput(BaseModel):
 
 class ActivityChoice(BaseModel):
     cost: int = Field(default=0, ge=0, description="本次实际购买商品或用餐的预计支出，按钱包单位填写")
+    groceries: int = Field(default=0, ge=0, description="实际买回的食材够自己吃几餐")
+    food: Literal["", "做好留餐", "现做现吃", "吃留餐", "外食", "受招待", "备料"] = ""
     continuation_id: str = ""
     title: str = Field(min_length=1, max_length=160)
     kind: Kind = Field(description="cook 表示做饭，meal 表示吃饭；合并安排时明确包含吃饭并预留用餐时间。")
@@ -104,6 +106,14 @@ class ActivityChoice(BaseModel):
     book_id: str = ""
     research_query: str = Field(default="", max_length=200)
     research_freshness: Literal["current", "knowledge"] = "current"
+
+    @model_validator(mode="before")
+    @classmethod
+    def skip_unused_freshness(cls, value):
+        """普通生活活动沿用默认时效，只有联网检索才区分资料类型。"""
+        if isinstance(value, dict) and not value.get("research_query") and "research_freshness" in value:
+            return {**value, "research_freshness": "current"}
+        return value
 
 
 class LifeState(BaseModel):

@@ -104,6 +104,20 @@ def test_neighborhood_shop_upgrade(life):
     assert len([p for p in x.store.all("place") if "便利店" in p["name"]]) == 1
 
 
+def test_neighborhood_dining_reuses_existing_restaurant(life):
+    x = life
+    assert x.spatial.route("住处", "街口早餐铺")["minutes"] == 6
+    shop = x.spatial.place("街坊小饭馆")
+    x.spatial.save_place("小林面馆", False, "手擀面", shop["id"])
+    x.spatial.save_route("street", shop["id"], 4, "步行")
+    with x.store.db:
+        x.store.delete("runtime", "neighborhood_dining")
+    spatial = Spatial(x.engine)
+    assert spatial.route("住处", "小林面馆")["minutes"] == 7
+    assert not any(p["name"] == "街坊小饭馆" for p in x.store.all("place"))
+    assert sum(p["name"] == "街口早餐铺" for p in x.store.all("place")) == 1
+
+
 def test_schedule_travel_change_cancel(life):
     x = life
     plan = x.spatial.schedule(PlanInput(title="阅读", start=(x.now + timedelta(hours=1)).isoformat(),

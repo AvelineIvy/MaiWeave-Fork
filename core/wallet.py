@@ -7,6 +7,7 @@ from uuid import uuid4
 
 OPENING_BALANCE = 1500
 SHIFT_HOURLY_PAY = 30
+MONTHLY_BILLS = {"rent": "房租", "utilities": "生活杂费"}
 
 
 def rent_date(month, day):
@@ -25,14 +26,50 @@ class Wallet:
     def account(self):
         return self.store.find("runtime", "wallet") or {"id": "wallet", "opening": OPENING_BALANCE, "balance": OPENING_BALANCE}
 
+    def pantry(self):
+        return self.store.find("runtime", "pantry") or {"id": "pantry", "raw": 3, "ready": 0}
+
+    def food_action(self, choice):
+        pantry = self.pantry()
+        food = choice.food
+        if choice.groceries and not choice.cost:
+            raise ValueError("买菜请填写这次实际花费")
+        if choice.kind == "meal" and choice.continuation_id and pantry["ready"] and not choice.cost:
+            memory = self.store.find("activity_memory", choice.continuation_id) or {}
+            event = self.store.find("experience", memory.get("experience_id", "")) or {}
+            prepared = self.store.find("plan", event.get("plan_id", "")) or {}
+            if prepared.get("food") == "做好留餐":
+                food = "吃留餐"
+        if not food and choice.kind == "meal":
+            if choice.cost and not choice.groceries:
+                food = "外食"
+            else:
+                food = "吃留餐" if pantry["ready"] else "现做现吃"
+        if not food and choice.kind == "cook":
+            food = "做好留餐"
+        if (food in {"做好留餐", "备料"} and choice.kind != "cook"
+                or food in {"现做现吃", "吃留餐", "外食", "受招待"} and choice.kind != "meal"):
+            raise ValueError("请按实际活动填写做饭或用餐类型")
+        if food in {"做好留餐", "现做现吃"} and pantry["raw"] + choice.groceries < 1:
+            raise ValueError("家里食材已用完，可以安排买菜、吃留餐或付费用餐")
+        if food == "吃留餐" and not pantry["ready"]:
+            raise ValueError("目前没有已经做好的留餐")
+        if food == "外食" and not choice.cost:
+            raise ValueError("在外购买成品餐请填写餐费")
+        return food
+
     def set_opening(self, amount):
         if amount < 0 or self.store.count("payment"):
             raise ValueError("起始生活费可在第一笔收支前设置，金额须为非负整数")
         with self.store.db:
             return self.store.put("runtime", {"id": "wallet", "balance": amount, "opening": amount})
 
-    def configure_rent(self, amount, day, now):
-        rent = self.store.find("runtime", "rent")
+    def configure_rent(self, amount, day, now, utilities=0):
+        for key, price in (("rent", amount), ("utilities", utilities)):
+            self._configure_bill(key, price, day, now)
+
+    def _configure_bill(self, key, amount, day, now):
+        rent = self.store.find("runtime", key)
         if not rent and not amount:
             return
         if rent and (rent["amount"], rent["day"]) == (amount, day):
@@ -40,16 +77,16 @@ class Wallet:
         today = now.date()
         with self.store.db:
             if rent:
-                self._bill_rent(rent, today)
+                self._accrue_bills(rent, today)
             else:
-                rent = {"id": "rent", "pending": [], "last_month": ""}
+                rent = {"id": key, "pending": [], "last_month": ""}
             due = rent_date(today, day)
             if due < today or due.isoformat()[:7] == rent["last_month"]:
                 due = rent_date(next_month(today), day)
             rent.update(amount=amount, day=day, next=due.isoformat() if amount else "")
             self.store.put("runtime", rent)
 
-    def _bill_rent(self, rent, today):
+    def _accrue_bills(self, rent, today):
         while rent["next"] and rent["next"] <= today.isoformat():
             due = date.fromisoformat(rent["next"])
             month = rent["next"][:7]
@@ -57,17 +94,21 @@ class Wallet:
             rent["last_month"] = month
             rent["next"] = rent_date(next_month(due), rent["day"]).isoformat()
 
-    def _settle_rent(self, now):
-        rent = self.store.find("runtime", "rent")
+    def _settle_monthly_bills(self, now):
+        for key, label in MONTHLY_BILLS.items():
+            self._settle_bill(key, label, now)
+
+    def _settle_bill(self, key, label, now):
+        rent = self.store.find("runtime", key)
         if not rent or not (rent["pending"] or rent["next"] and rent["next"] <= now.date().isoformat()):
             return
         previous_due = rent["next"]
         previous_count = len(rent["pending"])
-        self._bill_rent(rent, now.date())
+        self._accrue_bills(rent, now.date())
         while rent["pending"]:
             bill = rent["pending"][0]
-            purpose = "房租:" + bill["month"]
-            title = bill["month"] + " 房租"
+            purpose = label + ":" + bill["month"]
+            title = bill["month"] + " " + label
             requests = [r for r in self.store.all("money_request") if r["purpose"] == purpose]
             if self.account()["balance"] < bill["amount"]:
                 if not requests:
@@ -83,19 +124,41 @@ class Wallet:
             self.store.put("runtime", rent)
 
     def rent_note(self):
-        rent = self.store.find("runtime", "rent")
+        return "；".join(n for key, label in MONTHLY_BILLS.items() if (n := self._bill_note(key, label)))
+
+    def _bill_note(self, key, label):
+        rent = self.store.find("runtime", key)
         if rent and rent["pending"]:
             bill = rent["pending"][0]
             gap = max(0, bill["amount"] - self.account()["balance"])
-            text = f"{bill['month']} 房租待缴 · {bill['amount']} {self.currency_name}"
+            text = f"{bill['month']} {label}待缴 · {bill['amount']} {self.currency_name}"
             if gap:
                 text += f" · 还差 {gap} {self.currency_name}"
             if len(rent["pending"]) > 1:
                 text += f" · 共 {len(rent['pending'])} 期待缴"
             return text
         if rent and rent["amount"]:
-            return f"下次交租 {rent['next']} · {rent['amount']} {self.currency_name}"
+            title = "下次交租" if key == "rent" else "下次缴生活杂费"
+            return f"{title} {rent['next']} · {rent['amount']} {self.currency_name}"
         return ""
+
+    def spending_room(self, now, completed):
+        """用最近七个完整日的餐费、菜钱和即将到期的账单估算余款。"""
+        today = now.date()
+        food_by_day = {}
+        for p in completed:
+            day = date.fromisoformat(p["end"][:10])
+            if 1 <= (today - day).days <= 7 and (p["kind"] == "meal" or p.get("groceries")):
+                food_by_day[day] = food_by_day.get(day, 0) + p.get("cost", 0)
+        meals = sum(food_by_day.values()) + 40 * (7 - len(food_by_day))
+        bills = 0
+        for key in MONTHLY_BILLS:
+            bill = self.store.find("runtime", key)
+            if bill:
+                bills += sum(r["amount"] for r in bill["pending"])
+                if bill["next"] and date.fromisoformat(bill["next"]) <= today + timedelta(days=7):
+                    bills += bill["amount"]
+        return {"近期账单": bills, "一周饭钱估计": meals, "预留后余款": self.account()["balance"] - bills - meals}
 
     def _post(self, key, amount, title, now, session="", user=""):
         if self.store.find("payment", key):
@@ -141,7 +204,7 @@ class Wallet:
         fare = sum(leg.get("fare", 0) for leg in plan["route"]["legs"])
         if not fare:
             return ""
-        self._settle_rent(now)
+        self._settle_monthly_bills(now)
         balance = self.account()["balance"]
         if balance < fare:
             return f"车费需要 {fare} {self.currency_name}，存款只有 {balance} {self.currency_name}"
@@ -150,6 +213,16 @@ class Wallet:
 
     def settle(self, plan, now):
         """随完成记录在同一个事务里记账。"""
+        food, bought = plan.get("food", ""), plan.get("groceries", 0)
+        if bought or food in {"做好留餐", "现做现吃", "吃留餐"}:
+            experience = self.store.get("experience", plan["experience_id"])
+            if "家中余粮" not in experience["details"]:
+                pantry = self.pantry()
+                pantry["raw"] += bought - int(food in {"做好留餐", "现做现吃"})
+                pantry["ready"] += int(food == "做好留餐") - int(food == "吃留餐")
+                self.store.put("runtime", pantry)
+                experience["details"]["家中余粮"] = f"食材{pantry['raw']}餐，已做好{pantry['ready']}餐"
+                self.store.put("experience", experience)
         fare = sum(leg.get("fare", 0) for leg in (plan.get("route") or {}).get("legs", []))
         cost = plan.get("cost", 0) + fare
         if cost or plan.get("pay"):
@@ -185,10 +258,10 @@ class Wallet:
                     request["status"] = "已还清"
                 self.store.put("money_request", request)
         if amount:
-            self._settle_rent(now)
+            self._settle_monthly_bills(now)
 
     def planning_note(self, now):
-        rows = [r for r in self.store.all("money_request") if r["date"] == now.date().isoformat() and not r["source_session"] and not r.get("purchased_at") and not r["purpose"].startswith(("房租:", "通勤:"))]
+        rows = [r for r in self.store.all("money_request") if r["date"] == now.date().isoformat() and not r["source_session"] and not r.get("purchased_at") and not r["purpose"].startswith(("房租:", "生活杂费:", "通勤:"))]
         if not rows:
             return "暂无"
         row = rows[-1]
@@ -220,7 +293,7 @@ class Wallet:
 
     def refresh(self, now):
         with self.store.db:
-            self._settle_rent(now)
+            self._settle_monthly_bills(now)
             balance = self.account()["balance"]
             for row in self.store.all("money_request"):
                 if row["status"] in {"待询问", "答应稍后给"}:
@@ -311,5 +384,5 @@ class Wallet:
             row.update(status=status, owed=row["amount"] if action == "lend" else 0)
             self.store.put("money_request", row)
             if action in {"lend", "give"}:
-                self._settle_rent(now)
+                self._settle_monthly_bills(now)
             return row

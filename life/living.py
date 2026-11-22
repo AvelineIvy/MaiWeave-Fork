@@ -381,7 +381,7 @@ class Living:
                     if plan.get("book_id"):
                         with store.db:
                             store.delete("book_note", plan["id"])
-                    plan.update(pay=0, hourly_pay=0, cost=0, purchase_request="")
+                    plan.update(pay=0, hourly_pay=0, cost=0, purchase_request="", groceries=0, food="")
                     plan.pop("shift_scene", None)
                     plan.pop("shift_started", None)
                     plan.update(title="室内休息" if state["energy"] < 25 or state["stress"] >= 70 else "室内休闲",
@@ -498,6 +498,7 @@ class Living:
         state = engine.state()
         wallet = engine.wallet
         spending_note = wallet.planning_note(now)
+        pantry = wallet.pantry()
         signature = hashlib.sha256(json.dumps({
             "day": now.date().isoformat(), "sleep": config.schedule_enabled and in_hours(now.hour, config.sleep_hour, config.wake_hour),
             "body": [state["hunger"] >= 65, state["energy"] <= 25, state["stress"] >= 70],
@@ -515,6 +516,7 @@ class Living:
             engine.store.put("runtime", {"id": "planning", "at": now.isoformat(), "signature": signature})
         session = ""
         cost = hourly_pay = 0
+        food, groceries = "", 0
         exploration = await self.world.exploration_status(now) if self.config.world.explore_enabled else {"ready": False}
         research_query, research_freshness = "", "current"
         search_ready = self.config.world.places_enabled and (await self.world.search_status())["ready"]
@@ -570,6 +572,9 @@ class Living:
             goals = [select_fields(g, ("id", "title", "completed_sessions", "target_sessions")) for g in engine.store.all("goal") if g["status"] == "active"]
             completed = sorted((p for p in engine.store.all("plan") if p["status"] == "completed"),
                                key=lambda p: engine.time(p["end"]), reverse=True)
+            meals = [p["title"] for p in completed if p["kind"] == "meal"][:4]
+            groceries_bought = [p["title"] for p in completed if p.get("groceries")][:2]
+            spending_room = wallet.spending_room(now, completed)
             window = now - timedelta(hours=2)
             reading_seconds = sum(min(p["elapsed_seconds"], (engine.time(p["end"]) - max(window, engine.time(p["start"]))).total_seconds())
                                   for p in completed if p.get("book_id") and engine.time(p["end"]) > window)
@@ -584,7 +589,19 @@ class Living:
             environment = {"weather": select_fields(weather, ("city", "label", "current", "observed_at", "stale", "outdoor_suitable")),
                            "news": [select_fields(r, ("title", "published_at")) for r in environment["news"]],
                            "readings": [brief(select_fields(r, ("title", "content")), 160, 2) for r in environment["readings"]]}
-            places = [select_fields(p, ("name", "category")) for p in self.world.planning_places()]
+            available_places = {p["name"]: p for p in self.world.planning_places()}
+            places = []
+            for route in self.spatial.routes_from(state["location"]):
+                place = available_places.get(route["destination"])
+                if place:
+                    entry = select_fields(place, ("name", "category"))
+                    entry["路程分钟"] = route["minutes"]
+                    fare = sum(leg.get("fare", 0) for leg in route["legs"])
+                    if fare:
+                        entry["车费"] = fare
+                    if place.get("description") and place["description"] != "角色世界中的虚拟地点":
+                        entry["用途"] = place["description"][:48]
+                    places.append(entry)
             context = self.continuity.context("", now)
             influences = {key: [select_fields(r, fields) for r in rows] for key, fields, rows in (
                 ("preferences", ("activity", "score"), sorted(context["preferences"], key=lambda r: abs(r["score"]), reverse=True)[:8]),
@@ -613,6 +630,15 @@ class Living:
                 "时长按这次想完成的小事选择：随手收拾、坐一会儿可用10至20分钟；读一段、做一道菜按内容与空档安排。"
                 "疲惫或兴趣一般时选短一点，有具体兴致时可多留些时间。空闲也可以安静歇一会儿。"
                 f"最近打算花的钱：{spending_note}。"
+                f"本周的钱：{spending_room}，单位为{wallet.currency_name}。余款少时多用现有食材和物品。"
+                "余款宽裕时，结合口味、兴趣和手头的事决定要不要点道喜欢的菜、添点材料；没有想买的就把钱存着。"
+                f"家里的生食材够{pantry['raw']}餐，做好待吃的有{pantry['ready']}餐。"
+                f"最近几顿按从近到远：{meals}。最近两次买菜：{groceries_bought}。"
+                "买菜前想想接下来想做哪道菜；连着吃了几顿相似的，结合口味和余粮选今天想吃的。"
+                "外食按想吃的东西、店里供应什么、路程和下一项安排选地方；赶时间可以买现成的，有空可以坐下点餐。"
+                "买菜可作独立活动，标题写买什么，groceries填能做几餐，cost填总价。食材快用尽时可以顺路补货。"
+                "food按实际选：做好留餐、现做现吃、吃留餐、外食、受招待、备料。切洗食材选备料。吃刚做好的饭选吃留餐。"
+                "外卖和买早餐属于外食。受招待要有具体的请客或供餐依据。其他活动food留空。"
                 f"钱包有{wallet.account()['balance']}{wallet.currency_name}。{wallet.rent_note()} 每单位按人民币1元估价，已知标价优先。早餐5～12、简餐15～30、饮料3～15、少量食材10～30、日用品或手工材料10～50，按品类和数量估总价。买东西或外食时cost填实际花费，取快递或使用已有物品填0。房租由钱包按月支付，车费沿用路线。"
                 f"日常身份：{(self.engine.store.find('runtime', 'occupation') or {}).get('name', self.config.life.occupation or '未设定')}。"
                 "课程和班次沿用日程。按学段、专业、职业和技能安排空闲时间；上课和课题研究用study，远程工作也可以在住处进行。"
@@ -649,6 +675,7 @@ class Living:
                 "根据仍在有效期内的天气选择活动，恶劣天气优先在室内休息或活动。"
             )
             def validate_activity(choice):
+                choice.food = wallet.food_action(choice)
                 if (not choice.book_id and not choice.research_query and books and choice.kind in {"study", "leisure"}
                         and self.reading_title(choice.title)):
                     named = max((b for b in books if b["title"] in choice.title), key=lambda b: len(b["title"]), default=None)
@@ -658,7 +685,8 @@ class Living:
                         choice.book_id = books[0]["id"]
                 if choice.book_id and (choice.kind not in {"study", "leisure"} or not any(b["id"] == choice.book_id for b in books)):
                     raise ValueError("阅读书架时选学习或休闲，并填写书架中的书籍 ID；其他活动将 book_id 留空")
-                if state["hunger"] >= 65 and choice.kind not in {"cook", "meal"}:
+                buying_for_meal = choice.groceries and pantry["raw"] == pantry["ready"] == 0
+                if state["hunger"] >= 65 and choice.kind not in {"cook", "meal"} and not buying_for_meal:
                     raise ValueError("当前饥饿程度已达到65，请选择吃饭meal或做饭cook；已有待吃饭菜时优先meal")
                 if choice.continuation_id:
                     offer = next((r for r in continuations if r["id"] == choice.continuation_id), {})
@@ -690,6 +718,7 @@ class Living:
             goal_id = choice.goal_id
             goal_step_id = choice.goal_step_id
             cost = choice.cost
+            food, groceries = choice.food, choice.groceries
             if choice.continuation_id:
                 continuation = next(r for r in continuations if r["id"] == choice.continuation_id)
                 continuation_id, session = continuation["id"], continuation["session_id"]
@@ -749,6 +778,7 @@ class Living:
             title = f"阅读《{book['title']}》"
         if source == "睡前收尾":
             cost = hourly_pay = 0
+            food, groceries = "", 0
         price = cost + sum(leg.get("fare", 0) for leg in route["legs"])
         if price and price > wallet.account()["balance"] and kind != "sleep":
             wallet.need(title, price, session, now, continuation_id)
@@ -759,6 +789,8 @@ class Living:
         plan = self.spatial.schedule(value, session, now, autonomous=True, sleep_deadline=sleep_deadline)
         with engine.store.db:
             plan.update(cost=cost, hourly_pay=hourly_pay, pay=round(hourly_pay * minutes / 60))
+            if food or groceries:
+                plan.update(food=food, groceries=groceries)
             if price:
                 plan["purchase_request"] = wallet.purchase_for(session, title, continuation_id)
             plan["decision"] = {"at": now.strftime("%m-%d %H:%M"), "source": source, "title": title,

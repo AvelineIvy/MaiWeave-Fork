@@ -833,7 +833,7 @@ class WebUI:
                 sent = self.store.find("sharing", loan["session"]) or {}
                 if "wallet:" + loan["id"] in sent.get("notice_ids", []):
                     loan["status"] = "等对方回复"
-        return {"currency_name": self.engine.wallet.currency_name, "wallet": self.engine.wallet.account(), "rent": self.engine.wallet.rent_note(),
+        return {"currency_name": self.engine.wallet.currency_name, "wallet": self.engine.wallet.account(), "rent": self.engine.wallet.rent_note(), "pantry": self.engine.wallet.pantry(),
                 "payments": self.store.page("payment", size=20, time_field="at")["items"],
                 "loans": loans}
 

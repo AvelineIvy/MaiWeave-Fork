@@ -34,6 +34,7 @@ class LifeConfig(PluginConfigBase):
     currency_name: str = setting("货币名称", default="虚拟元", min_length=1, pattern=r"\S", description="显示在金额后的名称，例如麦币、星星。")
     opening_balance: int = setting("起始存款", default=OPENING_BALANCE, ge=0, description="每单位参照人民币 1 元的购买力。第一笔收支前可调整，开始记账后按实际收支计算余额。")
     monthly_rent: int = setting("每月房租", default=0, ge=0, description="按月从存款支付，填 0 停止产生新账单。")
+    monthly_utilities: int = setting("每月生活杂费", default=0, ge=0, description="水电、燃气和网络的每月合计，与房租同日结算。填 0 关闭。")
     rent_day: int = setting("交租日", default=1, ge=1, le=31, description="每月几号交租。遇到短月份，在当月最后一天交。")
     autonomous: bool = setting("自主安排活动", default=True, description="空闲时由角色选择活动")
     timezone: str = setting("生活时区（必填）", default="Asia/Shanghai", description="已填中国标准时间，可直接使用；其他地区例如 Asia/Tokyo。")

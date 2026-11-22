@@ -10,6 +10,71 @@ from test_plugin import plugin
 from test_proactive_modes import prepare
 
 
+async def test_groceries_cooking_and_leftovers(plugin):
+    from maiweave.core.models import ActivityChoice
+    from maiweave.core.wallet import Wallet
+    w, st, now = plugin.engine.wallet, plugin.store, plugin.now()
+    w.set_opening(100)
+    for index, (kind, action, cost, bought, raw, ready) in enumerate([
+        ("leisure", "", 18, 3, 6, 0), ("cook", "备料", 0, 0, 6, 0),
+        ("cook", "做好留餐", 0, 0, 5, 1), ("meal", "吃留餐", 0, 0, 5, 0),
+        ("meal", "现做现吃", 0, 0, 4, 0), ("meal", "外食", 10, 0, 4, 0),
+    ]):
+        choice = ActivityChoice(kind=kind, food=action, groceries=bought, cost=cost, title="生活安排",
+                                minutes=20, location="住处", motivation="午餐", research_freshness="")
+        key = str(index)
+        if action == "吃留餐":
+            with st.db:
+                st.put("plan", {"id": "午饭", "food": "做好留餐"})
+                st.put("experience", {"id": "饭已出锅", "plan_id": "午饭"})
+                st.put("activity_memory", {"id": "趁热吃", "experience_id": "饭已出锅"})
+            choice = choice.model_copy(update={"continuation_id": "趁热吃", "food": "现做现吃"})
+            assert w.food_action(choice) == "吃留餐"
+        plan = {**choice.model_dump(), "food": w.food_action(choice), "id": key, "experience_id": key}
+        with st.db:
+            st.put("experience", {"id": key, "details": {}})
+            w.settle(plan, now)
+            w.settle(plan, now)
+        assert Wallet(st).pantry() == {"id": "pantry", "raw": raw, "ready": ready}
+    assert w.account()["balance"] == 72
+    assert st.count("payment") == 2
+    with pytest.raises(ValueError, match="没有已经做好的"):
+        w.food_action(choice.model_copy(update={"food": "吃留餐"}))
+
+
+async def test_utilities_and_seven_day_spending_room(plugin):
+    w = plugin.engine.wallet
+    start = datetime.fromisoformat("2028-01-23T09:00:00+08:00")
+    w.set_opening(100)
+    w.configure_rent(70, 31, start, 40)
+    meals = [{"end": (start - timedelta(days=i)).isoformat(), "kind": "meal", "cost": 18} for i in range(1, 8)]
+    assert w.spending_room(start, meals) == {"近期账单": 0, "一周饭钱估计": 126, "预留后余款": -26}
+    assert w.spending_room(start + timedelta(days=1), meals)["近期账单"] == 110
+    due = start.replace(day=31)
+    w.refresh(due)
+    w.refresh(due)
+    assert w.account()["balance"] == 30
+    assert w.spending_room(due, [])["近期账单"] == 40
+    request, = w.pending(due)
+    assert request["amount"] == 10
+    w.notice(request, "甲", "店员")
+    w.respond(request["id"], "甲", "店员", "give", due)
+    w.refresh(due)
+    assert w.account()["balance"] == 0
+    assert plugin.store.get("payment", "生活杂费:2028-01")["amount"] == -40
+    assert w.spending_room(due, [])["近期账单"] == 0
+    w.configure_rent(0, 31, due, 40)
+    assert "2028-02-29" in w.rent_note()
+    next_due = due.replace(month=2, day=29)
+    with plugin.store.db:
+        w._post("工钱:二月", 55, "书店工钱", next_due)
+    w.refresh(next_due)
+    w.refresh(next_due)
+    assert w.account()["balance"] == 15
+    assert not plugin.store.find("payment", "房租:2028-02")
+    assert plugin.store.get("payment", "生活杂费:2028-02")["amount"] == -40
+
+
 async def test_monthly_rent_loan_and_payday(plugin):
     w, store = plugin.engine.wallet, plugin.store
     now = datetime.fromisoformat("2028-01-31T09:00:00+08:00")
