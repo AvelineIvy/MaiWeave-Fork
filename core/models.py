@@ -149,7 +149,7 @@ class ChatArrangements(BaseModel, extra="forbid"):
 
 
 class RoutineInput(BaseModel):
-    pay: int = Field(default=0, ge=0, description="每班报酬，按钱包单位填写")
+    pay: int = Field(default=0, ge=0, description="每班总报酬。新工作省略时按时长和30元时薪估算，明确无薪填0")
     title: str = Field(min_length=1, max_length=160)
     frequency: Literal["daily", "weekly", "monthly"] = "weekly"
     interval: int = Field(default=1, ge=1, le=52)

@@ -481,7 +481,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         kwargs["extra_prompt"] += self.context_text(session, book_id, text, "回复")
         return {"action": "continue", "modified_kwargs": kwargs}
 
-    @Tool("maiweave_wallet", description="私聊中查看麦麦的虚拟钱包和与当前用户的借款。对方明确借出用lend、赠送用give、以后再给用promise、拒绝用decline。先查询list取得申请ID，金额沿用申请。", parameters=schema({
+    @Tool("maiweave_wallet", description="私聊中查看麦麦的虚拟钱包和与当前用户的借款。对方明确借出用lend、赠送用give、以后再给用promise、拒绝用decline。车费看list的commutes，按最晚出发时间判断能否赶上。用对应id办理，金额沿用差额。", parameters=schema({
         "action": {"type": "string", "enum": ["list", "lend", "give", "promise", "decline"]},
         "amount": {"type": "integer", "minimum": 0, "description": "明确给出的整数金额，省略表示申请金额"},
         "request_id": text_field("本次借款申请ID")}, ["action"]))
@@ -492,10 +492,16 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         if self.chat_context.kinds.get(session) != "private":
             raise ValueError("请在私聊里处理虚拟钱包")
         wallet = self.engine.wallet
+        now = self.now()
+        if request_id.startswith("通勤:"):
+            self.spatial.reconcile(now)
         if action == "list":
-            return {"currency_name": wallet.currency_name, "balance": wallet.account()["balance"], "requests": [
+            return {"commutes": wallet.commute_requests(session, user, now)[:3], "currency_name": wallet.currency_name, "balance": wallet.account()["balance"], "requests": [
                 r for r in self.store.all("money_request") if r["session"] == session and r["user"] == user][-5:]}
-        return {**wallet.respond(request_id, session, user, action, self.now(), amount), "currency_name": wallet.currency_name}
+        result = wallet.respond(request_id, session, user, action, now, amount)
+        if request_id.startswith("通勤:") and action in {"lend", "give"}:
+            self.spatial.reconcile(now)
+        return {**result, "currency_name": wallet.currency_name}
 
     @Tool("maiweave_person_state", description="记录当前发言人此刻的短期状态。用户说明起床、忙完或返回时间时，用 until 保存结束时间；值得到时关心的事情同时用 maiweave_continuity 的 save_thread 保存。用户改时间时更新近况和原跟进事项，已醒来或忙完时记录空闲并结束对应事项。", parameters=schema({"status": {"type": "string", "enum": ["准备睡觉", "忙碌", "外出", "空闲"]}, "until": text_field("近况结束时间，带时区的 ISO 日期时间；省略时使用该状态的默认时长")}, ["status"]))
     @operation

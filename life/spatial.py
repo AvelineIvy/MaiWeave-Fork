@@ -8,6 +8,12 @@ from ..core.engine import ACTIVE, uid
 from ..core.models import PlanInput
 
 
+class FareShortfall(ValueError):
+    def __init__(self, message, route):
+        super().__init__(message)
+        self.route = route
+
+
 class Spatial:
     def __init__(self, engine):
         self.engine = engine
@@ -77,18 +83,22 @@ class Spatial:
                         self.engine.store.put(category, item)
         return record
 
-    def save_route(self, origin: str, destination: str, minutes: int, mode: str, fare: int = 0) -> dict:
-        if fare < 0:
+    def save_route(self, origin: str, destination: str, minutes: int, mode: str, fare: int | None = None) -> dict:
+        if fare is not None and fare < 0:
             raise ValueError("车费须为非负整数")
         a, b = self.place(origin), self.place(destination)
         if a["id"] == b["id"] or minutes < 1:
             raise ValueError("路线需连接两个不同地点，耗时至少一分钟")
         key = ":".join(sorted([a["id"], b["id"]]))
-        record = {"id": key, "origin": a["id"], "destination": b["id"], "minutes": minutes, "mode": mode, "fare": fare}
         with self.engine.store.db:
             for old in self.engine.store.all("route"):
                 if {old["origin"], old["destination"]} == {a["id"], b["id"]}:
+                    if fare is None and old["mode"] == mode:
+                        fare = old.get("fare", 0)
                     self.engine.store.delete("route", old["id"])
+            if fare is None:
+                fare = {"公交": 2, "地铁": 3}.get(mode, 0)
+            record = {"id": key, "origin": a["id"], "destination": b["id"], "minutes": minutes, "mode": mode, "fare": fare}
             self.engine.store.put("route", record)
         return record
 
@@ -121,7 +131,10 @@ class Spatial:
         route = self.route(origin, destination)
         balance = self.engine.wallet.account()["balance"]
         if sum(leg.get("fare", 0) for leg in route["legs"]) > max(0, balance):
-            return self.route(origin, destination, budget=max(0, balance))
+            try:
+                return self.route(origin, destination, budget=max(0, balance))
+            except ValueError as error:
+                raise FareShortfall(str(error), route) from error
         return route
 
     def projected_location(self, at, now, excluded=()) -> str:
@@ -152,6 +165,7 @@ class Spatial:
                 continue
             start, end = engine.time(plan["start"]), engine.time(plan["end"])
             duration = end - start
+            plan.pop("commute", None)
             try:
                 route = self.travel_route(origin, plan["location"]) if plan["location"] else {"minutes": 0, "legs": [], "origin": origin, "destination": origin}
                 minutes = route["minutes"] if plan["kind"] != "travel" else 0
@@ -213,6 +227,12 @@ class Spatial:
             except ValueError as error:
                 plan["status"] = "blocked"
                 plan["blocking_reason"] = str(error)
+                if isinstance(error, FareShortfall) and plan["kind"] == "work":
+                    route = error.route
+                    deadline = start - timedelta(minutes=route["minutes"])
+                    if available <= deadline or available == now:
+                        plan["commute"] = {"fare": sum(leg.get("fare", 0) for leg in route["legs"]),
+                                           "departure": deadline.isoformat()}
                 with store.db:
                     store.put("schedule_issue", {"id": plan["id"], "session_id": plan["session_id"], "title": plan["title"],
                                                  "reason": str(error), "at": now.isoformat()})

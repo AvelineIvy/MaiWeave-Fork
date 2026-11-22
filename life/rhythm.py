@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from ..core.engine import ACTIVE, uid
 from ..core.models import PlanInput, RoutineInput
+from ..core.wallet import SHIFT_HOURLY_PAY
 
 
 def matches(rule: dict, day: date) -> bool:
@@ -24,6 +25,7 @@ def matches(rule: dict, day: date) -> bool:
     return months % interval == 0 and day.day == rule["month_day"]
 
 
+
 class Rhythm:
     def __init__(self, engine, spatial, config):
         self.engine, self.spatial, self.config = engine, spatial, config
@@ -38,8 +40,11 @@ class Rhythm:
         if value.frequency == "weekly" and (not value.weekdays or any(d not in range(7) for d in value.weekdays)):
             raise ValueError("每周规则需填写星期，周一为0，周日为6")
         old = self.engine.owned("routine", rule_id, session) if rule_id else None
-        if old and value.kind == "work" and "pay" not in value.model_fields_set:
-            value = value.model_copy(update={"pay": old.get("pay", 0)})
+        if value.kind == "work" and "pay" not in value.model_fields_set:
+            pay = max(1, round(SHIFT_HOURLY_PAY * value.duration_minutes / 60))
+            if old and old["kind"] == "work":
+                pay = old.get("pay", 0)
+            value = value.model_copy(update={"pay": pay})
         record = {"id": rule_id or uid(), **value.model_dump(), "session_id": session, "status": "active",
                   "request_user_id": user_id, "revision": old["revision"] + 1 if old else 1, "exceptions": old["exceptions"] if old else [], "updated_at": now.isoformat()}
         with self.engine.store.db:

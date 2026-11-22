@@ -60,9 +60,9 @@ const schemas={
  profile:{label:'个人资料',save:'profile',id:'profile_id',remove:'delete_profile',fields:[['session_id','交流与提醒聊天流（必填）','chats',''],['notes','生活备注（选填）','textarea',''],['intimacy_mode','亲密程度设置',{auto:'按画像与互动判断',manual:'手动设置'},'auto'],['intimacy','亲密等级',{'0':'普通','1':'熟悉','2':'亲近','3':'亲密'},0],['relationship','关系状态',{普通关系:'普通关系',朋友:'朋友',好友:'好友',家人:'家人',恋人:'恋人',伴侣:'伴侣',前任:'前任'},'普通关系']]},
  anniversary:{label:'生日与纪念日',save:'anniversary',id:'anniversary_id',remove:'delete_anniversary',fields:[['profile_id','所属人物','profiles',''],['title','名称','text','生日'],['calendar','历法',{solar:'公历',lunar:'农历'},'solar'],['month','月份',Object.fromEntries(Array.from({length:12},(_,i)=>[i+1,`${i+1}月`])),1],['day','日期',Object.fromEntries(Array.from({length:31},(_,i)=>[i+1,`${i+1}日`])),1],['year','出生或起始年份（未知填0）','number',0],['leap_month','农历闰月','checkbox',false],['enabled','开启当日提醒','checkbox',true]]},
  plan:{label:'生活日程',save:'plan',id:'plan_id',editOnly:true,fields:[['new_title','标题','text','','title'],['new_start','开始时间','datetime-local','','start'],['new_end','结束时间','datetime-local','','end'],['new_location','地点','locations','','location']]},
- routine:{label:'重复日程',save:'routine',id:'rule_id',fields:[['title','标题','text',''],['anchor_date','起始日期','date',''],['start_time','开始时间','time','20:00'],['duration_minutes','时长（分钟）','number',30],['frequency','频率',{daily:'每天',weekly:'每周',monthly:'每月'},'weekly'],['interval','间隔','number',1],['weekdays','星期（可多选）','weekdays','周一,周三,周五'],['month_day','每月日期',Object.fromEntries(Array.from({length:31},(_,i)=>[i+1,`${i+1}日`])),1],['until','截止日期（选填）','date',''],['kind','活动类型',kinds,'leisure'],['pay','每班报酬','number',0],['location','地点','locations',''],['session_id','聊天流（公共活动可留空）','chats',''],['participants','参与者（逗号分隔）','text',''],['simulation','角色模拟活动','checkbox',true]]},
+ routine:{label:'重复日程',save:'routine',id:'rule_id',fields:[['title','标题','text',''],['anchor_date','起始日期','date',''],['start_time','开始时间','time','20:00'],['duration_minutes','时长（分钟）','number',30],['frequency','频率',{daily:'每天',weekly:'每周',monthly:'每月'},'weekly'],['interval','间隔','number',1],['weekdays','星期（可多选）','weekdays','周一,周三,周五'],['month_day','每月日期',Object.fromEntries(Array.from({length:31},(_,i)=>[i+1,`${i+1}日`])),1],['until','截止日期（选填）','date',''],['kind','活动类型',kinds,'leisure'],['pay','每班报酬，留空按每小时 30 折算','number',''],['location','地点','locations',''],['session_id','聊天流（公共活动可留空）','chats',''],['participants','参与者（逗号分隔）','text',''],['simulation','角色模拟活动','checkbox',true]]},
  place:{label:'生活地点',save:'place',id:'place_id',fields:[['name','地点名称','text',''],['outdoor','室外地点','checkbox',false],['description','地点描述','textarea','']]},
- route:{label:'地点路线',save:'route',fields:[['origin','起点','places',''],['destination','终点','places',''],['minutes','耗时（分钟）','number',15],['fare','单程车费','number',0],['mode','出行方式',{步行:'步行',骑行:'骑行',公交:'公交',地铁:'地铁',驾车:'驾车'},'步行']]},
+ route:{label:'地点路线',save:'route',fields:[['origin','起点','places',''],['destination','终点','places',''],['minutes','耗时（分钟）','number',15],['fare','单程车费，留空按出行方式','number',''],['mode','出行方式',{步行:'步行',骑行:'骑行',公交:'公交',地铁:'地铁',驾车:'驾车'},'步行']]},
  experience:{label:'生活经历',save:'experience',id:'experience_id',editOnly:true,fields:[['summary','经历摘要','textarea',''],['evidence','本次补充或更正的依据','textarea',''],['detail_key','细节项目（选填）','text',''],['detail_value','细节内容','textarea','']]},
  thread:{label:'跟进话题',save:'thread',id:'thread_id',fields:[['title','话题','text',''],['context','具体内容','textarea',''],['due_at','跟进时间（必填）','datetime-local',''],['expires_at','截止时间（选填，默认24小时后）','datetime-local',''],['session_id','所属聊天流','chats','']]}
 };
@@ -92,7 +92,7 @@ async function edit(row){
  }
  if(category==='routine'){
   const kind=$('field_kind'),pay=$('field_pay');
-  const showPay=()=>{pay.parentElement.hidden=kind.value!=='work';if(pay.parentElement.hidden)pay.value='0'};
+  const showPay=()=>{pay.parentElement.hidden=kind.value!=='work';if(pay.parentElement.hidden)pay.value=''};
   kind.addEventListener('change',showPay);showPay();
  }
  if(category==='profile'){
@@ -123,7 +123,7 @@ async function run(work){message('处理中…');try{await work();if($('status')
 $('save').onclick=()=>run(async()=>{
  const schema=schemas[category],args={};
  for(const [name,,type,,source] of schema.fields){const input=$('field_'+name);const value=type==='checkbox'?input.checked:type==='weekdays'?Array.from(input.selectedOptions).map(o=>o.value).join(','):type==='number'||['month','day','month_day','intimacy'].includes(name)?Number(input.value):input.value;
-  const original=type==='datetime-local'?String(selected?.[source]??'').slice(0,16):(selected?.[source]??'');if(category==='plan'&&value===original)continue;args[name]=value;}
+  if(['pay','fare'].includes(name)&&input.value==='')continue;const original=type==='datetime-local'?String(selected?.[source]??'').slice(0,16):(selected?.[source]??'');if(category==='plan'&&value===original)continue;args[name]=value;}
  if(schema.id&&selected)args[schema.id]=selected.id;
  if(category==='profile'){args.person_id=$('personChoice').value;args.name='';if(!args.person_id){message('请先搜索并选择 MaiBot 人物画像');return}}
  if(category==='plan'&&Object.keys(args).length===1){message('内容与当前记录一致');return}

@@ -868,7 +868,7 @@ class WebUI:
         return self.spatial.save_place(name, outdoor, description, place_id)
 
     @API("ui_save_route", description="添加或更新双向路线")
-    async def ui_save_route(self, origin: str, destination: str, minutes: int, mode: str = "步行", fare: int = 0) -> dict:
+    async def ui_save_route(self, origin: str, destination: str, minutes: int, mode: str = "步行", fare: int | None = None) -> dict:
         return self.spatial.save_route(origin, destination, minutes, mode, fare)
 
     @API("ui_move", description="开始移动到指定地点")

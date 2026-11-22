@@ -150,9 +150,10 @@ class FeatureTools:
         "origin": {"type": "string"}, "destination": {"type": "string"}, "name": {"type": "string"},
         "description": {"type": "string"}, "outdoor": {"type": "boolean"},
         "minutes": {"type": "integer", "minimum": 1}, "mode": {"type": "string"},
+        "fare": {"type": "integer", "minimum": 0, "description": "单程车费，知道票价时填写，免费填0"},
     }, ["action"]))
     async def space_tool(self, action: str, origin: str = "", destination: str = "", name: str = "", description: str = "",
-                         outdoor: bool = False, minutes: int = 1, mode: str = "步行", **kwargs):
+                         outdoor: bool = False, minutes: int = 1, mode: str = "步行", fare: int | None = None, **kwargs):
         self.require_life()
         self.engine.advance(self.now())
         if action == "map":
@@ -164,7 +165,7 @@ class FeatureTools:
         if action == "save_place":
             return self.spatial.save_place(name, outdoor, description)
         if action == "save_route":
-            return self.spatial.save_route(origin, destination, minutes, mode)
+            return self.spatial.save_route(origin, destination, minutes, mode, fare)
         raise ValueError("未知地点操作")
 
     @Tool("maiweave_dream", description="回忆已经保存的梦境，或为一段已完成睡眠生成梦境。梦境保存在独立档案中，回忆时以梦境视角讲述。", parameters=parameters({

@@ -5,6 +5,10 @@ from datetime import date, timedelta
 from uuid import uuid4
 
 
+OPENING_BALANCE = 1500
+SHIFT_HOURLY_PAY = 30
+
+
 def rent_date(month, day):
     return month.replace(day=min(day, monthrange(month.year, month.month)[1]))
 
@@ -19,7 +23,7 @@ class Wallet:
         self.currency_name = "虚拟元"
 
     def account(self):
-        return self.store.find("runtime", "wallet") or {"id": "wallet", "opening": 100, "balance": 100}
+        return self.store.find("runtime", "wallet") or {"id": "wallet", "opening": OPENING_BALANCE, "balance": OPENING_BALANCE}
 
     def set_opening(self, amount):
         if amount < 0 or self.store.count("payment"):
@@ -150,7 +154,7 @@ class Wallet:
             self._settle_rent(now)
 
     def planning_note(self, now):
-        rows = [r for r in self.store.all("money_request") if r["date"] == now.date().isoformat() and not r["source_session"] and not r.get("purchased_at") and not r["purpose"].startswith("房租:")]
+        rows = [r for r in self.store.all("money_request") if r["date"] == now.date().isoformat() and not r["source_session"] and not r.get("purchased_at") and not r["purpose"].startswith(("房租:", "通勤:"))]
         if not rows:
             return "暂无"
         row = rows[-1]
@@ -220,12 +224,42 @@ class Wallet:
                 and request["date"] == now.date().isoformat()
                 and request["amount"] <= request["price"] - self.account()["balance"])
 
+    def commute_requests(self, session, user, now):
+        balance = self.account()["balance"]
+        offers = []
+        for plan in self.store.all("plan"):
+            trip = plan.get("commute")
+            if not trip or plan["status"] != "blocked" or plan["session_id"] not in ("", session):
+                continue
+            key = "通勤:" + plan["id"]
+            gap = trip["fare"] - balance
+            if gap <= 0 or plan["end"] < now.isoformat() or self.store.find("money_request", key):
+                continue
+            offers.append({"id": key, "title": plan["title"] + "的车费", "price": trip["fare"], "amount": gap,
+                           "purpose": key, "source_session": plan["session_id"], "session": session, "user": user,
+                           "date": now.date().isoformat(), "status": "待询问", "owed": 0, "departure": trip["departure"]})
+        return sorted(offers, key=lambda row: row["departure"])
+
     def respond(self, key, session, user, action, now, amount=0):
-        row = self.store.get("money_request", key)
+        row = self.store.find("money_request", key)
+        if row is None and key.startswith("通勤:"):
+            row = next((r for r in self.commute_requests(session, user, now) if r["id"] == key), None)
+        if row is None:
+            raise ValueError("当前私聊没有这笔待处理的借款")
         if (row["session"], row["user"]) != (session, user):
             raise ValueError("请选择当前私聊的借款")
         if row["status"] not in {"待询问", "答应稍后给"}:
             return row
+        if key.startswith("通勤:"):
+            if action not in {"lend", "give"}:
+                raise ValueError("等对方确认借出或赠予车费时再入账")
+            plan = self.store.get("plan", key.split(":", 1)[1])
+            commute = plan.get("commute")
+            if plan["status"] != "blocked" or not commute or now.isoformat() > commute["departure"]:
+                raise ValueError("这班车费已经用不上了，先调整排班或路线")
+            row.update(date=now.date().isoformat(), price=commute["fare"])
+            if action in {"lend", "give"} and amount and amount != row["price"] - self.account()["balance"]:
+                raise ValueError("请按当前班次所差的车费确认金额")
         if row["price"] <= self.account()["balance"] or (row["date"] != now.date().isoformat() and row["status"] == "待询问"):
             raise ValueError("这笔生活费已经够用或申请已过期")
         status = {"promise": "答应稍后给", "lend": "借入", "give": "赠予", "decline": "已婉拒"}[action]

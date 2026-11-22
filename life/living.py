@@ -600,7 +600,7 @@ class Living:
                 "时长按这次想完成的小事选择：随手收拾、坐一会儿可用10至20分钟；读一段、做一道菜按内容与空档安排。"
                 "疲惫或兴趣一般时选短一点，有具体兴致时可多留些时间。空闲也可以安静歇一会儿。"
                 f"最近打算花的钱：{spending_note}。"
-                f"钱包有{wallet.account()['balance']}{wallet.currency_name}。{wallet.rent_note()} 买东西或外食时cost填实际花费，取快递或使用已有物品填0。房租由钱包按月支付，车费沿用路线。"
+                f"钱包有{wallet.account()['balance']}{wallet.currency_name}。{wallet.rent_note()} 每单位按人民币1元估价，已知标价优先。早餐5～12、简餐15～30、饮料3～15、少量食材10～30、日用品或手工材料10～50，按品类和数量估总价。买东西或外食时cost填实际花费，取快递或使用已有物品填0。房租由钱包按月支付，车费沿用路线。"
                 "固定职业和班次沿用已排的工作日程。可接续念头有hourly_pay时，可在原地点做这份零工，kind选work并填写continuation_id；结合时薪、兴趣和空闲决定。"
                 f"此刻的习惯候选：{json.dumps(habit, ensure_ascii=False)}；目标下一步：{json.dumps(step, ensure_ascii=False)}；"
                 f"可接续的具体念头：{json.dumps(candidates, ensure_ascii=False)}。"

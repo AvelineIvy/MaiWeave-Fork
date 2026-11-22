@@ -49,6 +49,7 @@ async def test_monthly_rent_loan_and_payday(plugin):
 async def test_rent_starts_at_next_due_day(plugin):
     w = plugin.engine.wallet
     now = datetime.fromisoformat("2027-12-20T09:00:00+08:00")
+    w.set_opening(100)
     w.configure_rent(30, 1, now)
     w.refresh(now)
     assert w.account()["balance"] == 100 and "2028-01-01" in w.rent_note()
@@ -157,7 +158,7 @@ async def test_paid_opportunity_uses_saved_place_and_experience(plugin, monkeypa
     job, = [r for r in p.store.all("plan") if r["kind"]=="work"]
     assert job["pay"] == 30 and job["continuation_experience_id"] == "花店见闻"
     p.engine.advance(p.engine.time(job["end"]))
-    assert p.engine.wallet.account()["balance"] == 130
+    assert p.engine.wallet.account()["balance"] == p.config.life.opening_balance + 30
 
 @pytest.mark.parametrize("action, credited", [("give", 8), ("decline", 0)])
 async def test_shortfall_purchase_and_gift(plugin, monkeypatch, action, credited):
@@ -268,3 +269,53 @@ async def test_rent_and_next_day_commute(plugin, monkeypatch, case):
         assert next(p for p in plugin.store.all("plan") if p.get("routine_id") == later["id"])["status"] == "blocked"
     plugin.engine.advance(now + timedelta(seconds=30))
     assert len(plugin.store.all("payment")) == len(entries)
+
+@pytest.mark.parametrize("minutes_before,can_work", [(6, True), (5, True), (4, False)])
+async def test_private_fare_loan_resumes_original_shift(plugin, monkeypatch, minutes_before, can_work):
+    p = plugin
+    now = p.now()
+    start = (now + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
+    monkeypatch.setattr(p, "now", lambda: now)
+    await p.ui_save_place("花房")
+    await p.ui_save_route("住处", "花房", 5, "公交")
+    wallet = p.engine.wallet
+    wallet.set_opening(60)
+    rule = await p.ui_save_routine("花房早班", str(start.date()), "09:00", 60, frequency="daily",
+                                   until=str(start.date()), kind="work", location="花房", session_id="private")
+    shift = next(r for r in p.store.all("plan") if r.get("routine_id") == rule["id"])
+    wallet.configure_rent(60, now.day, now)
+    wallet.refresh(now)
+    p.spatial.reconcile(now)
+    now = start - timedelta(minutes=minutes_before)
+    await p.wallet_action("list", stream_id="private", user_id="friend")
+    offer, = wallet.commute_requests("private", "friend", now)
+    assert not wallet.commute_requests("other", "friend", now)
+    result = await p.wallet_action("lend", offer["id"], 2, stream_id="private", user_id="friend")
+    assert result["success"] == can_work
+    if can_work:
+        assert (await p.wallet_action("lend", offer["id"], 2, stream_id="private", user_id="friend"))["success"]
+    now = start + timedelta(hours=1, minutes=1)
+    p.engine.advance(now)
+    end_shift = p.store.get("plan", shift["id"])
+    assert end_shift["status"] == ("completed" if can_work else "blocked")
+    assert p.engine.state()["location"] == ("花房" if can_work else "住处")
+    assert [r["amount"] for r in p.store.all("payment")] == ([-60, 2, -2, 30, -2] if can_work else [-60])
+
+async def test_rmb_prices_and_shift_defaults(plugin):
+    p = plugin
+    assert p.engine.wallet.account()["balance"] == p.config.life.opening_balance == 1500
+    await p.ui_save_place("车站")
+    for mode, fare in [("公交", 2), ("地铁", 3), ("步行", 0)]:
+        assert (await p.ui_save_route("住处", "车站", 10, mode))["fare"] == fare
+    for price in (0, 6):
+        assert (await p.ui_save_route("住处", "车站", 10, "地铁", price))["fare"] == price
+    assert (await p.space_tool("save_route", origin="车站", destination="住处", mode="地铁", minutes=12))["fare"] == 6
+    day = str((p.now() + timedelta(days=1)).date())
+    async def shift(**kwargs):
+        return await p.ui_save_routine("花店值班", day, "09:00", 480, frequency="daily", until=day,
+                                       location="住处", kind="work", **kwargs)
+    rule = await shift()
+    assert rule["pay"] == 240
+    assert (await shift(rule_id=rule["id"], pay=280))["pay"] == 280
+    assert (await shift(rule_id=rule["id"]))["pay"] == 280
+    assert (await shift(rule_id=rule["id"], pay=0))["pay"] == 0
