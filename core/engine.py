@@ -20,6 +20,34 @@ def bounded(value: float, low: float = 0, high: float = 100) -> float:
     return round(min(high, max(low, value)), 3)
 
 
+def work_now(plan, now):
+    scene = plan.get("shift_scene")
+    if not scene:
+        return ""
+    if scene["done"]:
+        return f"这班已经忙完{scene['task'].rstrip('。')}。{scene['resolution']}"
+    note = f"{scene['task'].rstrip('。')}。{scene['detail']}"
+    if scene["situation"] == "受委屈":
+        note += "心里有点委屈。"
+    if scene["deadline"]:
+        deadline = datetime.fromisoformat(scene["deadline"])
+        left = (deadline - now).total_seconds()
+        needed = scene["finish_elapsed"] - plan["elapsed_seconds"]
+        note += f" 约好{deadline:%H:%M}交付。"
+        if left <= needed + 300:
+            note += "手头很赶，接话简短。"
+    elif scene["load"] != "常规" or scene["situation"] == "赶工":
+        note += "手上正忙，简短接话。"
+    return note
+
+
+def public_plan(plan):
+    scene = plan.get("shift_scene")
+    if scene and not scene["done"]:
+        return {**plan, "shift_scene": {k: v for k, v in scene.items() if k != "resolution"}}
+    return plan
+
+
 def travel_position(plan: dict) -> dict:
     route = plan["route"]
     elapsed = plan["elapsed_seconds"] / 60
@@ -169,6 +197,9 @@ class LifeEngine:
             updated.update(pay=0, cost=0, hourly_pay=0, purchase_request="")
         elif updated.get("hourly_pay"):
             updated["pay"] = round(updated["hourly_pay"] * (end - start).total_seconds() / 3600)
+        if any(updated[k] != plan[k] for k in ("kind", "title", "location", "start")):
+            updated.pop("shift_scene", None)
+            updated.pop("shift_started", None)
         updated["changes"].append({"at": now.isoformat(), "before": {k: plan[k] for k in changes}, "after": changes})
         if "start" in changes or updated["status"] == "blocked":
             updated["status"] = "scheduled"
@@ -209,7 +240,7 @@ class LifeEngine:
             plans = [p for p in plans if self.time(p["end"]) >= self.time(start)]
         if end:
             plans = [p for p in plans if self.time(p["start"]) <= self.time(end)]
-        return sorted(plans, key=lambda p: self.time(p["start"]))
+        return sorted((public_plan(p) for p in plans), key=lambda p: self.time(p["start"]))
 
     def record_experience(self, value: ExperienceInput, session: str, now: datetime) -> dict:
         occurred = self.time(value.occurred_at)
@@ -392,15 +423,16 @@ class LifeEngine:
 
     def _evolve(self, state: dict, hours: float, kind: str):
         if kind == "sleep":
-            state["energy"] = bounded(state["energy"] + 10 * hours)
             state["sleep_debt"] = bounded(state["sleep_debt"] - hours, 0, 24)
+            rested = 100 - 2 * state["sleep_debt"]
+            state["energy"] = bounded(state["energy"] + 10 * hours, high=max(state["energy"], rested))
         else:
-            drain = 6 if kind in {"work", "study", "travel"} else 3
+            drain = {"work": 5, "study": 6, "travel": 6}.get(kind, 3)
             state["energy"] = bounded(state["energy"] + (5 if kind == "rest" else -drain) * hours)
-            state["sleep_debt"] = bounded(state["sleep_debt"] + hours / 3, 0, 24)
+            state["sleep_debt"] = bounded(state["sleep_debt"] + hours / 2, 0, 24)
         state["hunger"] = bounded(state["hunger"] + (2 if kind == "sleep" else 5) * hours)
         state["mood"] = round(state["mood"] * (0.94 ** hours), 3)
-        stress_rate = 3 if kind in {"work", "study"} else -2
+        stress_rate = {"work": 1.5, "study": 3}.get(kind, -2)
         state["stress"] = bounded(state["stress"] + stress_rate * hours)
 
     def _completion_effect(self, state: dict, plan: dict):
@@ -427,6 +459,11 @@ class LifeEngine:
                 t = self.time(p[key])
                 if cursor < t < now:
                     boundaries.add(t)
+            scene = p.get("shift_scene")
+            if scene and not scene["done"]:
+                finish = max(cursor, self.time(p["start"])) + timedelta(seconds=scene["finish_elapsed"] - p["elapsed_seconds"])
+                if cursor < finish < min(now, self.time(p["end"])):
+                    boundaries.add(finish)
         times = sorted(boundaries)
         sleeping = False
         by_id = {p["id"]: p for p in plans}
@@ -464,6 +501,20 @@ class LifeEngine:
                 kind = current["kind"] if current else ("sleep" if sleeping else "idle")
                 self._evolve(state, seconds / 3600, kind)
                 if current:
+                    scene = current.get("shift_scene")
+                    if scene and not scene["done"]:
+                        remaining = scene["finish_elapsed"] - current["elapsed_seconds"]
+                        active_hours = min(seconds, remaining) / 3600
+                        effort = {"持续用力": 2, "高度专注": 1, "密集沟通": 0.5}.get(scene["load"], 0)
+                        state["energy"] = bounded(state["energy"] - effort * active_hours)
+                        if scene["load"] in {"高度专注", "密集沟通"}:
+                            state["stress"] = bounded(state["stress"] + active_hours)
+                        if seconds >= remaining:
+                            scene["done"] = True
+                            scene["finished_at"] = right.isoformat()
+                            if scene["relief"]:
+                                state["stress"] = bounded(state["stress"] - scene["relief"])
+                                state["mood"] = bounded(state["mood"] + 2, -100, 100)
                     if current["elapsed_seconds"] == 0:
                         current["elapsed_days"] = {}
                     if "elapsed_days" in current:
@@ -528,6 +579,11 @@ class LifeEngine:
                   "memory_id": "", "memory_revision": 0}
         if plan.get("book_id"):
             record["summary"] = f"结束{plan['title']}的阅读时段，正文笔记正在整理"
+        scene = plan.get("shift_scene")
+        if scene:
+            record["details"].update(手头工作=scene["task"], 班内情况=scene["detail"])
+            if scene["done"]:
+                record["details"]["事情的收尾"] = scene["resolution"]
         plan.update(status="completed", experience_id=record["id"])
         self.store.put("experience", record)
         self.wallet.settle(plan, now)
@@ -551,7 +607,7 @@ class LifeEngine:
         if current and not self.visible(current, session):
             current = {"status": "active", "summary": "正在处理其他安排", "end": current["end"]}
         plans = [p for p in self.plans(session) if p["status"] in ACTIVE | {"paused", "awaiting_confirmation", "blocked"}]
-        result = {"now": now.isoformat(), "state": state, "current": current, "plans": plans[:12],
+        result = {"now": now.isoformat(), "state": state, "current": public_plan(current) if current else None, "plans": plans[:12],
                   "experiences": self.experiences(session, limit=6),
                   "goals": [g for g in self.store.all("goal") if self.visible(g, session) and g["status"] == "active"]}
         if person:

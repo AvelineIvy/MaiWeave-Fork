@@ -378,6 +378,9 @@ class Living:
                         with store.db:
                             store.delete("book_note", plan["id"])
                 else:
+                    plan.update(pay=0, hourly_pay=0, cost=0, purchase_request="")
+                    plan.pop("shift_scene", None)
+                    plan.pop("shift_started", None)
                     plan.update(title="室内休息" if state["energy"] < 25 or state["stress"] >= 70 else "室内休闲",
                                 kind="rest" if state["energy"] < 25 or state["stress"] >= 70 else "leisure",
                                 location=self.spatial.place("home")["name"], goal_id="", goal_step_id="", book_id="", continuation_id="")
@@ -601,7 +604,9 @@ class Living:
                 "疲惫或兴趣一般时选短一点，有具体兴致时可多留些时间。空闲也可以安静歇一会儿。"
                 f"最近打算花的钱：{spending_note}。"
                 f"钱包有{wallet.account()['balance']}{wallet.currency_name}。{wallet.rent_note()} 每单位按人民币1元估价，已知标价优先。早餐5～12、简餐15～30、饮料3～15、少量食材10～30、日用品或手工材料10～50，按品类和数量估总价。买东西或外食时cost填实际花费，取快递或使用已有物品填0。房租由钱包按月支付，车费沿用路线。"
-                "固定职业和班次沿用已排的工作日程。可接续念头有hourly_pay时，可在原地点做这份零工，kind选work并填写continuation_id；结合时薪、兴趣和空闲决定。"
+                f"日常身份：{(self.engine.store.find('runtime', 'occupation') or {}).get('name', self.config.life.occupation or '未设定')}。"
+                "课程和班次沿用日程。按学段、专业、职业和技能安排空闲时间；上课和课题研究用study，远程工作也可以在住处进行。"
+                "可接续念头有hourly_pay时，可在约定地点做这份零工，kind选work并填写continuation_id；结合技能、时薪、路程和空闲决定。"
                 f"此刻的习惯候选：{json.dumps(habit, ensure_ascii=False)}；目标下一步：{json.dumps(step, ensure_ascii=False)}；"
                 f"可接续的具体念头：{json.dumps(candidates, ensure_ascii=False)}。"
                 "选择接续时填写 continuation_id，并在活动里回应该念头；选择目标时填写 goal_id 和 goal_step_id。"

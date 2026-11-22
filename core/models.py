@@ -16,6 +16,36 @@ def local_time(value: str, timezone: str) -> datetime:
     return parsed.replace(tzinfo=ZoneInfo(timezone)) if parsed.tzinfo is None else parsed
 
 
+class WeeklyDuty(BaseModel):
+    kind: Literal["study", "work"]
+    title: str = Field(min_length=1, max_length=100)
+    location: str = Field(min_length=1, max_length=80)
+    weekdays: list[int] = Field(min_length=1, max_length=7)
+    start_time: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    duration_minutes: int = Field(ge=1, le=720)
+
+    @model_validator(mode="after")
+    def check_days(self):
+        if any(day not in range(7) for day in self.weekdays):
+            raise ValueError("星期请填写0至6")
+        return self
+
+
+class Occupation(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    duties: list[WeeklyDuty] = Field(max_length=4)
+
+
+class ShiftScene(BaseModel):
+    task: str = Field(min_length=1, max_length=90)
+    situation: Literal["日常", "返工", "赶工", "受委屈"]
+    load: Literal["常规", "持续用力", "高度专注", "密集沟通"] = "常规"
+    detail: str = Field(max_length=100)
+    minutes: int = Field(ge=1)
+    deadline_minutes: int | None = Field(default=None, ge=1, le=1440)
+    resolution: str = Field(min_length=1, max_length=100)
+
+
 class PlanInput(BaseModel):
     title: str = Field(min_length=1, max_length=160)
     start: str

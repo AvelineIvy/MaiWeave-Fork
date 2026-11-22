@@ -6,7 +6,7 @@ import json
 from datetime import timedelta
 
 from ..core.engine import uid
-from ..core.models import ActivityAssessment, ActivityOutcome, GoalOutline, SCORE_GUIDE
+from ..core.models import ActivityAssessment, ActivityOutcome, GoalOutline, ShiftScene, SCORE_GUIDE
 from ..integrations.usage import generate
 from ..integrations.chat_context import brief, select_fields
 
@@ -26,6 +26,12 @@ class Continuity:
 
     async def ask(self, prompt, model, feature):
         return await generate(self.ctx, self.engine.store, self.config, feature, prompt, model)
+
+    async def work_background(self):
+        persona = await self.ctx.config.get("personality")
+        if isinstance(persona, dict):
+            persona = select_fields(persona, ("personality", "behavior_style"))
+        return f"人设={json.dumps(brief(persona, 350, 3), ensure_ascii=False)}；生活背景={self.config.life.background[:400]}"
 
     def context(self, session, now):
         store = self.engine.store
@@ -47,6 +53,11 @@ class Continuity:
     async def process(self, now):
         """每轮处理少量新记录；模型请求按重试规则执行，结果保存在页面。"""
         store = self.engine.store
+        current = self.engine.current(now)
+        if (self.config.continuity.outcomes_enabled and current and current["kind"] == "work"
+                and current["status"] == "active" and current["simulation"] and not current["participants"]
+                and not current.get("shift_started")):
+            await self.start_shift(current, now)
         if self.config.continuity.goal_planning:
             pending = [g for g in store.all("goal") if g["status"] == "active" and not g.get("steps")
                        and g.get("outline_status", "待分解") in {"待分解", "失败"}
@@ -60,6 +71,55 @@ class Continuity:
                         (record["status"] == "失败" and (not record.get("retry_at") or self.engine.time(record["retry_at"]) <= now)))]
         for plan in pending[:3]:
             await self.reflect(plan["id"], now)
+
+    async def start_shift(self, plan, now):
+        store = self.engine.store
+        with store.db:
+            plan["shift_started"] = True
+            store.put("plan", plan)
+        background = await self.work_background()
+        place = next((p for p in store.all("place") if p["name"] == plan["location"]), {})
+        shifts = [p for p in self.engine.plans(plan["session_id"]) if p["kind"] == "work" and p["status"] == "completed"
+                  and ((plan.get("routine_id") and p.get("routine_id") == plan["routine_id"]) or p["title"] == plan["title"])]
+        recent = [store.get("experience", p["experience_id"])["summary"][:100] for p in shifts[-3:]]
+        offer = store.find("activity_memory", plan.get("continuation_id", ""))
+        available = max(1, int((self.engine.time(plan["end"]) - now).total_seconds() / 60))
+        prompt = (
+            "模拟麦麦这班手头的一件工作。以本次排班或零工约定为准。人设里已有的职业、经验和做事习惯帮助确定具体任务、熟练程度和所需时间。"
+            "同一个人在不同地点可以做同一份工作，也可以偶尔做别的零工。职业未知时只描述这一次的差事。"
+            "多数班次写日常，只在这件事确有缘由时出现麻烦。"
+            "输出JSON：task写眼下要做什么，situation选日常、返工、赶工、受委屈；"
+            "load按这段任务实际占用的体力和注意力选常规、持续用力、高度专注、密集沟通。普通脑力活动或偶尔交谈选常规。"
+            "detail写手头进度。遇到人为难写对方的身份、原要求和具体举动；熟人沿用已有经历。"
+            "minutes是做完这件小事所需分钟数；明确有人约定交付时间才填deadline_minutes（距现在几分钟）。"
+            "resolution写这件事最后怎样收尾，可以是有人帮忙、顺利完成或改约交付。"
+            f"日常身份={(store.find('runtime', 'occupation') or {}).get('name', self.config.life.occupation or '未设定')}；"
+            f"班次={plan['title']}，地点={plan['location']}，缘由={plan['motivation']}，"
+            f"地点说明={place.get('description', '')[:120]}；现在={now:%H:%M}，剩余{available}分钟；{background}；"
+            f"零工约定={(offer or {}).get('next_action', '')[:160]}；"
+            f"之前上这班的经历={json.dumps(recent, ensure_ascii=False)}。"
+        )
+        scene = (await self.ask(prompt, ShiftScene, "班内情景")).model_dump()
+        current = store.get("plan", plan["id"])
+        if current["status"] != "active" or any(current[k] != plan[k] for k in ("kind", "title", "location", "start", "end")):
+            return
+        at = max(now, self.engine.time(self.engine.state()["updated_at"]))
+        left = (self.engine.time(current["end"]) - at).total_seconds()
+        if left <= 0:
+            return
+        deadline = scene.pop("deadline_minutes")
+        seconds = min(left, scene.pop("minutes") * 60)
+        scene.update(started_at=at.isoformat(), finish_elapsed=current["elapsed_seconds"] + seconds,
+                     deadline=(at + timedelta(minutes=deadline)).isoformat() if deadline else "", done=False)
+        mood, stress = {"返工": (-2, 3), "赶工": (0, 3), "受委屈": (-5, 4)}.get(scene["situation"], (0, 0))
+        if deadline and deadline * 60 <= seconds + 300:
+            stress += 2
+        scene["relief"] = min(3, stress)
+        with store.db:
+            current["shift_scene"] = scene
+            store.put("plan", current)
+            if stress:
+                self.engine.affect(mood, stress, scene["detail"] or scene["task"], at, session=current["session_id"])
 
     async def reflect(self, plan_id, now):
         store = self.engine.store
@@ -116,7 +176,8 @@ class Continuity:
                        "描述为网上读到或了解到；后续想实践的事情放入next_action，适合的日期放入next_date。")
         if enrich:
             prompt += SCORE_GUIDE
-            prompt += "在本次地点遇到合情合理的带薪帮工机会时，可在next_action写明具体工作，hourly_pay按人民币购买力填约定的整数时薪；普通临时帮工参考20～30元/小时，有明确约定照约定。普通见闻填0。"
+            prompt += (f"{await self.work_background()}。结合角色会做的事和本次经历，遇到带薪帮工机会时，"
+                       "在next_action写明约定的地点和具体工作，hourly_pay按人民币购买力填约定的整数时薪；普通临时帮工参考20～30元/小时，有明确约定照约定。普通见闻填0。")
             prompt += (
                 "为这次已完成的角色活动补充过程和结果，接续已有作品进度与细节，"
                 "按活动时长安排合理进展，内容围绕角色独自进行的活动展开。"
@@ -164,7 +225,8 @@ class Continuity:
                     event.update(enjoyment=result.enjoyment, next_action=result.next_action)
                     self.engine.score_result(event, result.importance, result.score_reason)
                     store.put("experience", event)
-                    self.engine.affect(result.mood, result.stress, result.summary, now, duration_hours=48, session=plan["session_id"])
+                    if not plan.get("shift_scene"):
+                        self.engine.affect(result.mood, result.stress, result.summary, now, duration_hours=48, session=plan["session_id"])
                     previous = store.find("preference", key) or {"id": key, "session_id": plan["session_id"], "activity": result.activity, "score": 0, "samples": 0, "evidence_ids": []}
                     previous.update(score=round((previous["score"] * previous["samples"] + result.enjoyment) / (previous["samples"] + 1), 2),
                                     samples=previous["samples"] + 1, updated_at=now.isoformat())

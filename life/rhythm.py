@@ -62,6 +62,29 @@ class Rhythm:
                     and (plan["status"] == "blocked" or self.engine.time(plan["start"]) >= now)):
                 self.engine.transition(plan["id"], "cancel", plan["session_id"], now)
 
+    def apply_occupation(self, setting, identity, previous, now):
+        store = self.engine.store
+        for rule_id in previous.get("rules", []):
+            rule = store.find("routine", rule_id)
+            if rule and rule["status"] == "active" and rule["revision"] == 1:
+                self.cancel(rule_id, "", now)
+        existing = {r["kind"] for r in store.all("routine") if r["status"] == "active" and not r["session_id"]}
+        places = {p["name"] for p in store.all("place")}
+        rules = []
+        for duty in identity.duties:
+            if duty.kind in existing:
+                continue
+            if duty.location not in places:
+                place = self.spatial.save_place(duty.location, False, duty.title)
+                self.spatial.save_route("street", place["id"], 15, "步行")
+                places.add(duty.location)
+            rule = self.save(RoutineInput(**duty.model_dump(), anchor_date=now.date().isoformat()), "", now)
+            rules.append(rule["id"])
+        with store.db:
+            if not setting:
+                store.put("runtime", {"id": "occupation_default", **identity.model_dump()})
+            store.put("runtime", {"id": "occupation", "setting": setting, "name": setting or identity.name, "rules": rules})
+
     def cancel(self, rule_id: str, session: str, now) -> dict:
         rule = self.engine.owned("routine", rule_id, session)
         rule["status"] = "cancelled"

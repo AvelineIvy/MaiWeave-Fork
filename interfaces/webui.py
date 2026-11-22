@@ -576,6 +576,14 @@ class WebUI:
         decision = plan.get("decision", {})
         rows = [{"at": plan["created_at"], "title": decision.get("source", "安排活动"),
                  "text": decision.get("reason") or plan["motivation"] or plan["title"]}]
+        scene = plan.get("shift_scene")
+        if scene:
+            detail = f"{scene['task'].rstrip('。')}。{scene['detail']}"
+            if scene["deadline"]:
+                detail += f" 约好{self.engine.time(scene['deadline']):%H:%M}交付。"
+            rows.append({"at": scene["started_at"], "title": "手头的工作", "text": detail})
+            if scene["done"]:
+                rows.append({"at": scene["finished_at"], "title": "工作收尾", "text": scene["resolution"]})
         labels = {"title": "活动", "start": "开始", "end": "结束", "location": "地点", "motivation": "缘由", "kind": "类型"}
         actions = {"cancel": "取消活动", "pause": "暂停活动", "resume": "继续活动", "record_completion": "确认完成"}
         for change in plan["changes"][-30:]:

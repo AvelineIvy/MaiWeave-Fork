@@ -4,6 +4,7 @@ import json
 import re
 from collections import deque
 from copy import deepcopy
+from ..core.engine import work_now
 
 
 GUIDE = (
@@ -18,7 +19,7 @@ GUIDE = (
     "跨地点用 maiweave_space 查路线，目标填 goal_step_id；梦境说梦见，资讯带出处。\n"
 )
 
-LABELS = {"encounters": "群聊接话","life_images": "已展示图片","chat_arrangements": "聊天约定", "pending_changes": "资料确认", "person_states": "人物近况", "shared_topics": "分享接话",
+LABELS = {"work": "工作与语气", "encounters": "群聊接话","life_images": "已展示图片","chat_arrangements": "聊天约定", "pending_changes": "资料确认", "person_states": "人物近况", "shared_topics": "分享接话",
           "plans": "日程", "schedule_issues": "日程调整", "schedule_notices": "日程通知",
           "bookshelf": "阅读笔记", "profiles": "人物资料", "relationships": "人物关系",
           "anniversaries": "纪念日", "continuity": "生活接续", "goals": "目标",
@@ -123,6 +124,7 @@ class ChatContext:
         current = engine.current(now)
         if current and not engine.visible(current, session):
             current = {"summary": "正在处理其他安排", "end": current["end"]}
+        work = work_now(current or {}, now)
         current = select_fields(current or {}, ("id", "title", "summary", "kind", "status", "end", "location", "book_id", "goal_step_id", "continuation_id", "simulation"))
         awake = p.living.awake_until(now) if p.config.life.schedule_enabled else None
         snapshot = {"now": now.isoformat(timespec="minutes"), "timezone": engine.timezone,
@@ -162,6 +164,29 @@ class ChatContext:
             if value:
                 candidates.append((0 if key == "pending_changes" else 1 if key == "bookshelf" and book_id else 2 if relevant else 3, key, value))
         private = self.kinds.get(session) == "private"
+        identity = p.config.life.occupation.strip() or (store.find("runtime", "occupation") or {}).get("name")
+        if identity and identity != "未设定":
+            add("日常身份", identity, current.get("kind") in {"study", "work"})
+        if not work and current.get("kind") != "work":
+            recent_work = next((e for e in engine.experiences(session, limit=8)
+                                if "手头工作" in e["details"] and
+                                0 <= (now - engine.time(e["occurred_at"])).total_seconds() < 3 * 3600), None)
+            if recent_work:
+                work = "下班后的近况：" + (recent_work["details"].get("事情的收尾") or recent_work["summary"])
+        tone = []
+        if state["energy"] <= 30:
+            tone.append("累了，说话省力些")
+        if state["stress"] >= 60:
+            tone.append("有些紧绷，先接眼前的话")
+        if state["mood"] < -15:
+            tone.append("心里低落，语气收一点")
+        if work:
+            close = private and p.living.intimacy(session, self.speakers.get(session, "")) >= 2
+            if stage == "回复":
+                tone.insert(0, "这是你自己的近况。对方问候时，用第一人称挑一件事随口聊一两句")
+            tone.append("对方关心时可以说说心里话" if close else "对方问起再简短聊工作")
+        if work or tone:
+            add("work", "；".join(filter(None, [*tone, work])), True)
         if any(w in text for w in ("多少钱", "花了多少", "赚了多少", "挣了多少", "收支", "流水", "对账", "余额", "领了多少", "借款", "还款")):
             ledger = {"单位": engine.wallet.currency_name, "工具": "maiweave_wallet",
                       "最近流水": engine.wallet.recent_payments(session if private else "", self.speakers.get(session) if private else "", 4)}

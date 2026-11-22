@@ -27,6 +27,7 @@ def life(tmp_path):
     spatial = Spatial(engine)
     cfg = MaiWeaveConfig()
     ctx = SimpleNamespace(logger=logging.getLogger("test"), llm=SimpleNamespace(generate=AsyncMock()),
+                          config=SimpleNamespace(get=AsyncMock(return_value={})),
                           web=SimpleNamespace(search=AsyncMock(), fetch=AsyncMock()))
     world = World(engine, ctx, cfg)
     world.host_config_path = tmp_path / "model_config.toml"

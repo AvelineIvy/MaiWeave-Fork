@@ -10,12 +10,17 @@ from unittest.mock import AsyncMock
 import pytest
 
 from maiweave.config import MaiWeaveConfig
+from maiweave.core.store import Store
 from maiweave.plugin import create_plugin
 
 
 @pytest.fixture
 async def plugin(tmp_path):
     plugin = create_plugin()
+    store = Store(tmp_path / "maiweave.sqlite3")
+    with store.db:
+        store.put("runtime", {"id": "occupation", "name": "未设定", "setting": "", "rules": []})
+    store.close()
     config = MaiWeaveConfig()
     config.life.autonomous = False
     config.world.weather_enabled = False

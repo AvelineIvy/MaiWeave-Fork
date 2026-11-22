@@ -15,7 +15,7 @@ from time import monotonic
 from maibot_sdk import API, HomeCard, HookHandler, MaiBotPlugin, Tool, ConfigWidget, ConfigWidgetState
 
 from .config import MaiWeaveConfig
-from .core.engine import LifeEngine, read_life_status
+from .core.engine import LifeEngine, public_plan, read_life_status
 from .life.living import Living
 from .integrations.memory import NativeMemory
 from .integrations.life_images import LifeImages, current_image_candidates, distinct_image_calls
@@ -114,7 +114,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         # 展示分组仍指向原配置节，保存时沿用原有配置键。
         groups = [
             ("life", "life", "生活开关", "控制生活推进与自主活动。", ["enabled", "autonomous"]),
-            ("profile", "life", "角色设定", "时区已有默认值，背景和兴趣按需补充。", ["timezone", "interests", "background"]),
+            ("profile", "life", "角色设定", "设定麦麦的身份、生活背景和兴趣。", ["timezone", "occupation", "interests", "background"]),
             ("sleep", "life", "日常作息", "关闭作息可全天候交流；开启后按 24 小时制安排睡眠。", ["schedule_enabled", "nap_quiet", "sleep_skip_private_planner", "sleep_hour", "wake_hour"]),
             ("wake", "life", "睡眠唤醒", "设置私聊唤醒概率、唤醒词语和醒来后留给聊天的时间。", ["wake_enabled", "private_wake_probability", "wake_minutes", "wake_keywords"]),
             ("economy", "life", "经济设置", "设置麦麦的存款、货币和房租。", ["opening_balance", "currency_name", "monthly_rent", "rent_day"]),
@@ -188,6 +188,11 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
 
     def get_webui_config_schema(self, **kwargs):
         schema = super().get_webui_config_schema(**kwargs)
+        identity = self.store.find("runtime", "occupation") if self.store else None
+        if identity:
+            field = schema["sections"]["profile"]["fields"]["occupation"]
+            hint = field["description"] + " 当前身份：" + identity["name"] + "。"
+            field.update(description=hint, hint=hint)
         field = schema["sections"]["model_default"]["fields"]["model_task"]
         field.update(choices=list(dict.fromkeys([*self.model_tasks, self.config.life.model_task])), ui_type="select")
         for key in ("model_arrangement", "model_expression", "model_information"):
@@ -269,10 +274,37 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
             await self.on_load()
 
     async def run_life(self):
+        current = self.store.find("runtime", "occupation") or {}
+        if self.config.life.enabled and current.get("setting") != self.config.life.occupation.strip():
+            await self.run_background("身份与日程", self.initialize_occupation)
         while True:
             if self.config.life.enabled:
                 await self.tick()
             await asyncio.sleep(self.config.life.tick_seconds)
+
+    async def initialize_occupation(self, now):
+        from .core.models import Occupation
+
+        setting = self.config.life.occupation.strip()
+        current = self.store.find("runtime", "occupation") or {}
+        if current.get("setting") == setting:
+            return
+        default = self.store.find("runtime", "occupation_default")
+        if not setting and default:
+            identity = Occupation.model_validate(default)
+        else:
+            places = [p["name"] for p in self.store.all("place")]
+            prompt = (
+                "为麦麦确定日常身份和一份可编辑的初始周安排。手填身份优先，照原文保留职业、学段、年级和专业；"
+                "留空时从人设提取，人设未提及身份就写未设定，duties填空数组。"
+                "上学、上课、实验、论文和组会用study；只有明确的职业排班用work。学生按具体学段和专业安排，"
+                "各类身份都可有自己的作息。自由接单或没有固定时段可留空。将相同时间的星期合并，最多四条，时段互不重叠。"
+                "优先选合适的已有地点，也可写学校或单位。只返回JSON，name是身份全称，duties为数组，"
+                "每条含kind、title、location、weekdays（周一0至周日6）、start_time（HH:MM）、duration_minutes。"
+                f"手填身份={setting}；{await self.continuity.work_background()}；已有地点={places}"
+            )
+            identity = await self.continuity.ask(prompt, Occupation, "身份与日程")
+        self.rhythm.apply_occupation(setting, identity, current, now)
 
     async def tick(self):
         now = self.now()
@@ -612,8 +644,8 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         target = self.engine.owned("plan", plan_id, kwargs["stream_id"])
         self.living.check_influence(kwargs["stream_id"], kwargs.get("user_id", ""), [target])
         if action == "update":
-            return self.spatial.change(plan_id, PlanPatch.model_validate(patch or {}), kwargs["stream_id"], self.now())
-        return self.spatial.transition(plan_id, action, kwargs["stream_id"], self.now())
+            return public_plan(self.spatial.change(plan_id, PlanPatch.model_validate(patch or {}), kwargs["stream_id"], self.now()))
+        return public_plan(self.spatial.transition(plan_id, action, kwargs["stream_id"], self.now()))
 
     async def sync_experience(self, record: dict) -> dict:
         if record["memory_revision"] == record["revision"]:

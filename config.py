@@ -26,6 +26,7 @@ class PluginSection(PluginConfigBase):
 
 
 class LifeConfig(PluginConfigBase):
+    occupation: str = setting("身份与职业（选填）", default="", description="按自己的设定填写，例如初二学生、凝聚态物理博士生、自由译者。留空时首次从麦麦人设读取，固定课程和班次可在「日程与作息」调整。")
     """先设置角色与作息，再按需要调整模型和更新频率。"""
 
     __ui_label__ = "角色生活"
@@ -122,7 +123,7 @@ class ContinuityConfig(PluginConfigBase):
     """选择活动如何影响后续生活；提醒和跟进仍遵循主动交流开关。"""
 
     __ui_label__ = "生活连贯性"
-    outcomes_enabled: bool = setting("生成具体活动结果", default=True, description="独自模拟活动结束后生成细节、感受和下次接续内容")
+    outcomes_enabled: bool = setting("生成具体活动结果", default=True, description="上班时生成手头的事，独自模拟活动结束后整理细节、感受和后续打算。")
     semantic_learning: bool = setting("归并同类活动与学习偏好", default=True, description="使用 MaiBot 模型归并不同说法，依据已发生体验更新偏好")
     goal_planning: bool = setting("分解与推进长期目标", default=True, description="将目标拆成可执行阶段，并依据活动结果推进")
     adaptive_schedule: bool = setting("动态调整自主日程", default=True, description="天气、精力与临时事件改变时调整可变动安排")
@@ -216,11 +217,13 @@ class RetentionConfig(PluginConfigBase):
 
 
 MODEL_FEATURES = {
+    "身份与日程": "activity",
     "自主活动": "activity",
     "聊天安排": "activity",
     "日记安排": "diary_schedule",
     "习惯归类": "habits",
     "活动结果": "outcomes",
+    "班内情景": "outcomes",
     "目标分解": "goals",
     "书籍阅读": "reading",
     "生活日记": "diary",
