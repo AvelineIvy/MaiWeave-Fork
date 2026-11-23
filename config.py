@@ -69,7 +69,7 @@ class ProactiveConfig(PluginConfigBase):
     natural_greetings: bool = setting("作息问候", default=False, description="随角色起床和睡前安排问候，使用所选主动交流模式。共用发送额度和间隔，群聊在近期互动后道晚安。")
     session_ids: list[str] = setting("额外接收聊天流（选填）", default_factory=list, description="个人资料中选择的聊天流自动用于主动交流和纪念日提醒。这里填写额外的群聊或其他聊天流；可发送 /maiweave 获取 ID。")
     share_threshold: int = setting("经历分享最低分", default=5, ge=1, le=10, description="普通、熟悉关系及群聊按此分数筛选经历；亲近私聊也会考虑3分及以上、有具体细节的日常小事。模型每轮选一件或等待。生日祝福、约定提醒按各自时间触发。", json_schema_extra={"choices": list(range(1, 11))})
-    daily_limit: int = setting("每日主动发送上限", default=4, ge=0, description="每个聊天流每天最多发送几次，分段回复计一次；实际次数取决于当天经历和待跟进事项。")
+    daily_limit: int = setting("每日主动发送上限", default=4, ge=0, description="每个聊天流每天可发的分享与提醒次数，分段计一次。和日程约好的回信单独计。设为 0 暂停主动发送。")
     cooldown_minutes: int = setting("主动交流间隔（分钟）", default=60, ge=1, description="两次实际发送的最短间隔")
     retry_minutes: int = setting("未发送后重新判断间隔（分钟）", default=60, ge=1, description="选择稍后交流或生成、发送失败后，同一话题等待多久再判断；到达话题截止时间后结束尝试。")
     start_hour: int = setting("允许开始时间（整点）", default=DEFAULT_WAKE_HOUR, ge=0, le=23, description="经历分享与提醒的时间窗口起点；早晚安跟随作息。")

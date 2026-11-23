@@ -55,7 +55,8 @@ def prepare(plugin, monkeypatch):
 
 
 @pytest.mark.parametrize("mode", ["自然交流", "主动表达"])
-async def test_conversation_leaves_room_for_due_promise(plugin, monkeypatch, mode):
+@pytest.mark.parametrize("limit", [0, 1, 4])
+async def test_conversation_leaves_room_for_due_promise(plugin, monkeypatch, mode, limit):
     from test_activity_connections import set_time
     now = prepare(plugin, monkeypatch)
     set_time(plugin, now)
@@ -74,8 +75,17 @@ async def test_conversation_leaves_room_for_due_promise(plugin, monkeypatch, mod
     plugin.ctx.llm.generate.return_value = {"success": True, "response": '{"arrangements":[]}'}
     await plugin.chat_schedule.process(due)
     plugin.engine.advance(due)
+    plugin.config.proactive.daily_limit = limit
+    with plugin.store.db:
+        plugin.store.put("share_receipt", {"id": "previous", "session": "chat-a", "created": now.isoformat(),
+            "sent_at": now.isoformat(), "topic": "上次分享", "outcome": "实际已发送"})
     await plugin.living.share(due)
-    receipt, = plugin.store.all("share_receipt")
+    receipts = [r for r in plugin.store.all("share_receipt") if r["id"] != "previous"]
+    if limit == 0:
+        assert not receipts
+        return
+    receipt, = receipts
+    assert plugin.living.share_summary(due)[0]["sent"] == 1
     assert receipt["thread_id"] == thread["id"]
     assert receipt["mode"] == mode
     if mode == "自然交流":

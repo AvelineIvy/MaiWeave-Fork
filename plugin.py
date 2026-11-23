@@ -125,7 +125,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
             ("search", "world", "联网搜索", "复用 MaiBot 已配置的搜索服务。", ["search_enabled", "places_enabled"]),
             ("proactive", "proactive", "主动交流对象", "个人资料的聊天流用于交流和提醒；其他接收对象可在下方补充。", ["enabled", "group_enabled", "mode", "natural_greetings", "session_ids", "share_threshold"]),
             ("limits", "proactive", "交流时段与间隔", "发送间隔从实际发送计算，同一话题未发出时按重新判断间隔选择时机。", ["start_hour", "end_hour", "cooldown_minutes"]),
-            ("quota", "proactive", "每日发送额度", "每日额度是最多发送次数，分享内容来自生活经历和待跟进事项。", ["daily_limit"]),
+            ("quota", "proactive", "每日发送额度", "生活分享和提醒共用额度，约好在到站或完事后回你的消息单独计。", ["daily_limit"]),
         ]
         groups += [
             ('image_service', 'diary', '图片生成服务', '空间随笔与聊天共用此接口。', ['image_service_enabled', 'image_base_url', 'image_api_key', 'image_model', 'image_reference_protocol']),

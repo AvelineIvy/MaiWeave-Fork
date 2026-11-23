@@ -69,9 +69,8 @@ class ShareReceipts:
         recipient = recipient or {"场景": "私聊"}
         guide = (
             "判断这次生活经历是否值得现在主动告诉对方，输出JSON。发送时send=true，candidate填候选序号（从1开始）；等待时send=false，省略candidate。reason用一句中文说明，最多300字。"
-            "结合人物画像中的明确兴趣、关系和当前聊天判断话题是否适合这个对象。亲近的人可以分享日常小事；"
-            "普通、熟悉关系更看重共同兴趣、关心的进展或新发现；亲近、亲密关系也可以因为日常感受、小进展而想联系。兴趣未知时参考当前对话。"
-            "明确期待的后续优先于笼统兴趣；偶尔提起的话题按当次交流理解。画像中的近期互动、推测和稳定兴趣分别理解。"
+            "普通、熟悉关系看共同兴趣、关心的进展或新发现；亲近的人可以分享日常小事。兴趣未知时参考当前对话。"
+            "刚聊过烦心事，即使隔了一会儿，无关小事也可留到以后；对方说过想看作品，做好了就值得告诉对方。区分近期互动、推测和稳定兴趣。"
             "群聊按本群话题判断。有效亲密度沿用插件关系计算，0普通、1熟悉、2亲近、3亲密；本聊天互动描述当前聊天的积累。"
             "关系手动设置作为用户偏好，原生画像提供人物资料。"
             "结合实际分享与回应判断新意，相似的煮面、吃饭过程没有新进展时send=false。"
@@ -117,12 +116,15 @@ class ShareReceipts:
                 text = row["topic"]
             else:
                 reference = intent
-                if not (thread and thread.get("plan_id")):
+                style = "写一条可以直接发给聊天对象的即时消息。全文一到两句话，一段纯文本。用我和你来称呼双方，按角色平时的口吻说。约好的回信直接给答案，生活分享挑一个细节；最近聊天只用来接话。"
+                if thread and thread.get("plan_id"):
+                    style = "你在私聊里兑现约定。问结果就只写一句能直接发出去的答案，答出时间、地点、数量或材料就收住。对方明确问做法，才简短讲步骤。只采用材料里已经确认的事实。"
+                else:
                     context = await self.recent_chat(session)
                     reference = "最近聊天：" + json.dumps(context, ensure_ascii=False) + "\n本次发言任务：" + intent
                 result = await self.ctx.maisaka.reply.generate(
                     session, reference,
-                    format_instruction="写一条可以直接发给聊天对象的即时消息。全文一到两句话，一段纯文本。用我和你来称呼双方，按角色平时的口吻说。约好的回信直接给答案，生活分享挑一个细节；最近聊天只用来接话。",
+                    format_instruction=style,
                     timeout_ms=95000)
                 if not result["success"]:
                     raise RuntimeError(result.get("error") or "回复生成失败")
@@ -303,6 +305,6 @@ class ShareReceipts:
     def sent_times(self, session, zone):
         times = []
         for row in self.store.all("share_receipt"):
-            if row["session"] == session and row.get("mode") != "群聊接话" and row.get("sent_at"):
+            if row["session"] == session and row.get("mode") != "群聊接话" and not row.get("plan_promise") and row.get("sent_at"):
                 times.append(self.time(row["sent_at"], zone))
         return times

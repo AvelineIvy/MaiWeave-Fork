@@ -953,13 +953,14 @@ class Living:
                 attempts = [self.engine.time(r.get("finished_at") or r["created"]) for r in receipts]
                 if attempts:
                     at = max(at, max(attempts) + timedelta(minutes=cfg.retry_minutes))
-                if times:
+                if times and not item.get("plan_id"):
                     at = max(at, max(times) + timedelta(minutes=cfg.cooldown_minutes))
                 pending.append({"title": item["title"], "next_at": at.isoformat(), "expires_at": end.isoformat(), "status": "等待发送回执" if waiting else "等待判断"})
             result.append({"session": session, "sent": sum(t.date() == now.date() for t in times), "limit": cfg.daily_limit,
                            "pending": sorted(pending, key=lambda r: r["next_at"]),
                            "last_at": latest.get("created", ""), "last_outcome": latest.get("outcome", ""),
-                           "last_sent": max(times).isoformat() if times else "",
+                           "last_sent": max((r["sent_at"] for r in history if r.get("sent_at") and r["session"] == session
+                                             and r.get("mode") != "群聊接话"), key=lambda t: self.receipts.time(t, now.tzinfo), default=""),
                            "last": latest.get("delivery") or latest.get("reason") or "等待首次判断"})
         return result
 
@@ -1034,14 +1035,6 @@ class Living:
             replies = [engine.time(r["responded_at"]) for r in engine.store.all("share_receipt")
                        if r["session"] == session and r.get("responded_at") and r.get("followup") == "answered"]
             sent = engine.store.find("sharing", session) or {"id": session, "experience_ids": []}
-            times = self.receipts.sent_times(session, now.tzinfo)
-            count = sum(at.date() == now.date() for at in times)
-            if count >= config.daily_limit:
-                record("跳过", f"今日实际已发送 {count}/{config.daily_limit} 次", session)
-                continue
-            if times and now < (next_at := max(times) + timedelta(minutes=config.cooldown_minutes)):
-                record("跳过", f"上次实际发送在 {max(times):%H:%M}，下次可请求时间 {next_at:%m-%d %H:%M}", session)
-                continue
             if any(row["session"] == session and row.get("mode") != "群聊接话" and row["outcome"] == "MaiBot 已受理"
                    for row in self.engine.store.all("share_receipt")):
                 record("跳过", "上一次主动交流正在等待回执", session)
@@ -1112,10 +1105,11 @@ class Living:
                                 scene = plan["shift_scene"]
                                 milestone = f"{scene['task']}已做完：{scene['resolution']}"
                             topic = item.get("topic")
-                            resume = f"接着回答当时聊的「{topic}」。" if topic else "请用一句话兑现这次报信。"
+                            resume = f"回答对方原先问的「{topic}」。" if topic else ""
                             intent = (f"你对这个聊天的原话是「{item['context']}」。{resume}"
                                       f"本次进展：{milestone}；地点：{plan['location']}；日程：{plan['title']}；"
-                                      f"对应时间：{item['due_at']}。")
+                                      f"进展发生在{item['due_at']}，现在是{now.isoformat()}，按实际间隔措辞。"
+                                      "问的是结果就一句话报结果，问的是做法才讲步骤。")
                             notices.insert(0, (self.thread_key(item), intent, item))
                         continue
                     notices.append((self.thread_key(item), f"接续此前的话题：{item['title']}。已有上下文：{item['context']}。结合最近聊天跟进仍待解决的部分；已经解决时结束该话题。", item))
@@ -1123,6 +1117,16 @@ class Living:
                 if item["session_id"] == session:
                     notices.append((f"issue:{item['id']}:{item['reason']}", f"安排需要调整：{item['title']}。原因：{item['reason']}。说明当前待调整的状态。", None))
             notices = [n for n in notices if n[0] not in sent.get("notice_ids", []) and self.share_ready(n[0], session, now)]
+            promised = bool(ordinary_hours and notices and notices[0][2] and notices[0][2].get("plan_id"))
+            if not promised or config.daily_limit == 0:
+                times = self.receipts.sent_times(session, now.tzinfo)
+                count = sum(at.date() == now.date() for at in times)
+                if count >= config.daily_limit:
+                    record("跳过", f"今日实际已发送 {count}/{config.daily_limit} 次", session)
+                    continue
+                if times and now < (next_at := max(times) + timedelta(minutes=config.cooldown_minutes)):
+                    record("跳过", f"上次实际发送在 {max(times):%H:%M}，下次可请求时间 {next_at:%m-%d %H:%M}", session)
+                    continue
             if not notices:
                 if replies and now < max(replies) + SHARE_REPLY_PAUSE:
                     record("接着聊", "对方刚接上上次分享，先延续当前话题", session)
@@ -1177,10 +1181,9 @@ class Living:
                        + f"最近实际分享与回应：{json.dumps(self.receipts.context(session, now), ensure_ascii=False)}。")
             decision = None
             if notices:
-                promised = notices[0][2] and notices[0][2].get("plan_id")
                 intent = notices[0][1] if promised else notices[0][1] + context
             else:
-                choices = [f"本次经历发生时间={item['occurred_at']}；来源={item['source']}；内容={item['summary']}；"
+                choices = [f"内容={item['summary']}；来源={item['source']}；本次经历发生时间={item['occurred_at']}；"
                            f"细节={json.dumps(item['details'], ensure_ascii=False)}" for item in candidates]
                 decision = await self.receipts.decide(session, choices, now, self.config, recipient)
                 event = candidates[decision.candidate - 1] if decision.send else candidates[0]
@@ -1207,6 +1210,8 @@ class Living:
             if greeting:
                 row.update(greeting_key=greeting["key"], greeting_kind=greeting["kind"],
                            greeting_until=greeting["until"], score="作息问候，按近期互动与关系判断")
+            if promised:
+                row["plan_promise"] = True
             if not notices:
                 row["image_requested"] = decision.image and self.config.diary.chat_images_enabled and self.config.diary.image_service_enabled
                 row["share_reason"] = decision.reason
