@@ -104,6 +104,12 @@
 
 ### 🌇 生活地图 · 从天亮到熄灯
 
+傍晚 18:29，麦麦正从住处走去厨房。住宅图钉旁的小头像标着她的位置，沿街还能找到早餐铺、花店和大学。
+
+<p align="center">
+  <a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-map-labeled.png"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-map-labeled.png" width="800" alt="傍晚的生活地图：麦麦在住宅图钉旁，街区标出了大学、图书馆、花店、早餐铺和公园"></a>
+</p>
+
 地图上的一天按麦麦的生活时区过。看看桥边的花店：白天看得见门口的花，傍晚橱窗亮起来，到了深夜，河边只剩一排路灯。
 
 <div align="center">
