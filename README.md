@@ -112,6 +112,14 @@
 </table>
 </div>
 
+### 💬 下班再跟你讲
+
+麦麦正在校对样书，你问她封底改了哪里。她约好七点四十左右来找你。19:39:55，她自己发来一句「刚收工啦，来跟你说一声」，接着讲了封底署名的事。
+
+<p align="center">
+  <a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/after-work-chat.png"><img src="assets/after-work-chat.png" width="620" alt="本地聊天室实机记录：麦麦答应下班后再聊，19:39:55 主动回来告诉你，封底的署名核对无误。"></a>
+</p>
+
 ### 📸 图文分享 · 做好了，想给你看看
 
 饭菜、手工作品，或路上看到的小景，都可以成为一条带图的分享。你也可以接着问：“是什么样的？给我看看。”
