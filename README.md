@@ -20,7 +20,7 @@
 [![Last Commit](https://img.shields.io/github/last-commit/ilworkcn/MaiWeave?label=Last%20Commit&color=7ba989)](https://github.com/ilworkcn/MaiWeave/commits/main/)
 [![Issues](https://img.shields.io/github/issues/ilworkcn/MaiWeave?label=Issues&color=c58b75)](https://github.com/ilworkcn/MaiWeave/issues)
 
-[下载安装](https://github.com/ilworkcn/MaiWeave/releases/latest) · [使用手册](https://github.com/ilworkcn/MaiWeave/blob/main/docs/使用手册.md) · [配置指南](https://github.com/ilworkcn/MaiWeave/blob/main/docs/配置指南.md) · [状态 API](https://github.com/ilworkcn/MaiWeave/blob/main/docs/只读状态API.md) · [更新日志](https://github.com/ilworkcn/MaiWeave/blob/main/CHANGELOG.md)
+[下载安装](https://github.com/ilworkcn/MaiWeave/releases/latest) · [使用手册](docs/使用手册.md) · [配置指南](docs/配置指南.md) · [状态 API](docs/只读状态API.md) · [更新日志](CHANGELOG.md)
 
 </div>
 
@@ -57,7 +57,7 @@
 
 主动私聊还没等到回复，或是你说去睡了，却又在群里冒泡，麦麦可能在群里轻轻接一句。之后你在哪个聊天回应，她就在哪里接着聊；换了话题就聊新话题。
 
-关系可以结合原生画像与互动逐渐积累，也可以在「人物与纪念日」手动设置。主动联系沿用你配置的时段、间隔和每日次数。[查看亲密等级与日程说明 →](https://github.com/ilworkcn/MaiWeave/blob/main/docs/使用手册.md#修改资料与亲密等级)
+关系可以结合原生画像与互动逐渐积累，也可以在「人物与纪念日」手动设置。普通分享按你设置的时段、间隔和每日次数发送。如果麦麦答应「到了告诉你」，就算当天分享额度已用完，到站后也会在允许交流时回来报信。[查看亲密等级与日程说明 →](docs/使用手册.md#修改资料与亲密等级)
 
 ## 🧺 麦麦的生活里有什么？
 
@@ -82,21 +82,35 @@
 
 ### 🏡 生活面板 · 今天过得怎么样？
 
-当前活动、一天的轨迹、精力心情和主动交流记录，都能在「此刻生活」里找到。
+18:29，麦麦正从住处走去厨房，打算用冰箱里的食材做晚饭。右边能看到还剩几餐食材、今天领了多少工钱，地图下方是她从早到晚走过的行程。
 
 <p align="center">
-  <a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-overview.png"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-overview.png" width="800" alt="当前睡眠状态、一天的日程、主动交流与状态变化"></a>
+  <a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-overview.png"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-overview.png" width="800" alt="麦麦正在步行去厨房，旁边显示存款与冰箱，下方是傍晚的生活地图和今天的日程"></a>
 </p>
 
 ### 🌇 生活地图 · 从天亮到熄灯
 
 地图上的一天按麦麦的生活时区过。看看桥边的花店：白天看得见门口的花，傍晚橱窗亮起来，到了深夜，河边只剩一排路灯。
 
-| 时段 | 街区灯光 |
-| --- | --- |
-| ☀️ **白天**<br>06:00–18:00 | <a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-day.webp"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-day.webp" width="680" alt="白天的街区，大学、花店和河岸步道清晰可见"></a> |
-| 🌆 **夜晚**<br>18:00–23:00 | <a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-evening.webp"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-evening.webp" width="680" alt="夜晚的同一街区，店铺、住宅窗户和路灯亮起"></a> |
-| 🌙 **深夜**<br>23:00–次日 06:00 | <a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-late.webp"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-late.webp" width="680" alt="深夜楼窗熄灯，道路和桥边仍亮着路灯"></a> |
+<div align="center">
+<table>
+  <tr>
+    <th>☀️ 白天</th>
+    <th>🌆 夜晚</th>
+    <th>🌙 深夜</th>
+  </tr>
+  <tr>
+    <td align="center"><a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-day.webp"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-day.webp" width="180" alt="白天的街区，大学、花店和河岸步道清晰可见"></a></td>
+    <td align="center"><a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-evening.webp"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-evening.webp" width="180" alt="夜晚的同一街区，店铺、住宅窗户和路灯亮起"></a></td>
+    <td align="center"><a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-late.webp"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-late.webp" width="180" alt="深夜楼窗熄灯，道路和桥边仍亮着路灯"></a></td>
+  </tr>
+  <tr>
+    <td align="center">06:00–18:00</td>
+    <td align="center">18:00–23:00</td>
+    <td align="center">23:00–次日 06:00</td>
+  </tr>
+</table>
+</div>
 
 ### 📸 图文分享 · 做好了，想给你看看
 
@@ -106,7 +120,7 @@
   <a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-image-chat.png"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-image-chat.png" width="620" alt="分享猫咪蛋包饭和围着紫色围巾的手工兔子"></a>
 </p>
 
-开启方式：在 **插件配置 → 模型设置** 配好图片生成服务，并开启 **图片用途 → 聊天追问发图与主动分享配图**。外貌、参考图和画风在 **此刻生活 → 角色与图片** 调整，保存后可以「试画一张」。新图使用横版 4:3，同一经历已有图片时继续复用。[查看图片使用说明 →](https://github.com/ilworkcn/MaiWeave/blob/main/docs/使用手册.md#聊天里看看麦麦做了什么)
+开启方式：在 **插件配置 → 模型设置** 配好图片生成服务，并开启 **图片用途 → 聊天追问发图与主动分享配图**。外貌、参考图和画风在 **此刻生活 → 角色与图片** 调整，保存后可以「试画一张」。新图使用横版 4:3，同一经历已有图片时继续复用。[查看图片使用说明 →](docs/使用手册.md#聊天里看看麦麦做了什么)
 
 ### 🧣 出门裹暖一点，回家轻松一点
 
@@ -129,7 +143,7 @@
 2. 开启自主安排，让麦麦在读书时自行选书；也可以选中一本，点击 **安排阅读日程**。
 3. 读完后翻看笔记，或直接在聊天里点名这本书，问问它的感想。
 
-每本书分别保存进度与笔记。续读会参考该书之前的感想和疑问，聊天中也能用上对应笔记。书架支持归档、恢复和容量设置。[查看阅读操作说明 →](https://github.com/ilworkcn/MaiWeave/blob/main/docs/使用手册.md#书架与阅读)
+每本书分别保存进度与笔记。续读会参考该书之前的感想和疑问，聊天中也能用上对应笔记。书架支持归档、恢复和容量设置。[查看阅读操作说明 →](docs/使用手册.md#书架与阅读)
 
 <details>
 <summary>调整自主阅读的时长和间隔</summary>
@@ -167,7 +181,7 @@
 
 在 **日记与梦境 → 日记详情 → 日记发空间** 中生成和编辑文案。发布默认关闭，可选择手动发布，或随当天写日记日程完成后自动发布，每天一篇；可见范围支持好友、所有人和仅自己。
 
-需要 **MaiBot OneBot 适配器与已登录的 SnowLuma 或 NapCat**，沿用当前 QQ 登录。NapCat 通过适配器获取空间 Cookie，再上传配图、发布随笔。 [查看空间发布步骤 →](https://github.com/ilworkcn/MaiWeave/blob/main/docs/使用手册.md#日记发空间)
+需要 **MaiBot OneBot 适配器与已登录的 SnowLuma 或 NapCat**，沿用当前 QQ 登录。NapCat 通过适配器获取空间 Cookie，再上传配图、发布随笔。 [查看空间发布步骤 →](docs/使用手册.md#日记发空间)
 
 ## 🏡 打开 WebUI，翻翻它的生活
 
@@ -205,6 +219,8 @@
 
 ## 🚀 安装与设置
 
+本页展示 develop 分支的生活地图、排班、钱包和冰箱。下载稳定版时，可在 [Release](https://github.com/ilworkcn/MaiWeave/releases/latest) 查看该版本的功能。
+
 适配 **MaiBot 1.3.19–1.4.x、插件 SDK 2.21–2.23**，搭配支持 WebUI v2 页面协议的 WebUI。
 
 1. 从 [Release](https://github.com/ilworkcn/MaiWeave/releases/latest) 下载对应版本的 ZIP 安装包。
@@ -226,16 +242,16 @@
 | 展示生活图片 | 配好图片生成服务，开启聊天图片，在「角色与图片」设置外貌、参考图和画风 |
 | 收到主动消息和祝福 | 开启主动交流，在个人资料中选择「交流与提醒聊天流」 |
 
-**接上麦麦已有的记忆。** 在 MaiBot 人物画像中选中你，补上生活备注、生日和纪念日，让之后的相处接着这些记忆继续。同机运行的 MaiBot 1.4 可自动连接，状态在人物页面查看。[记忆连接设置 →](https://github.com/ilworkcn/MaiWeave/blob/main/docs/配置指南.md)
+**接上麦麦已有的记忆。** 在 MaiBot 人物画像中选中你，补上生活备注、生日和纪念日，让之后的相处接着这些记忆继续。同机运行的 MaiBot 1.4 可自动连接，状态在人物页面查看。[记忆连接设置 →](docs/配置指南.md)
 
-模型任务可在插件配置的「模型设置」中按功能选择；更新频率、容量和数据保留集中在「高级设置」。详见[配置指南](https://github.com/ilworkcn/MaiWeave/blob/main/docs/配置指南.md)。
+模型任务可在插件配置的「模型设置」中按功能选择；更新频率、容量和数据保留集中在「高级设置」。详见[配置指南](docs/配置指南.md)。
 
-天气可选择 Open-Meteo 或心知天气，联网见闻和地点搜索使用 MaiBot 已配置的联网服务。主动交流方式、发送频率和聊天细节等选项，见[配置指南](https://github.com/ilworkcn/MaiWeave/blob/main/docs/配置指南.md)。
+天气可选择 Open-Meteo 或心知天气，联网见闻和地点搜索使用 MaiBot 已配置的联网服务。主动交流方式、发送频率和聊天细节等选项，见[配置指南](docs/配置指南.md)。
 
 <details>
 <summary>手动安装与依赖版本</summary>
 
-农历纪念日使用 `lunar_python>=1.4.8`，生活时区使用 `tzdata>=2024.1`。插件已适配 MaiBot SDK 2.21、2.22 和 2.23 系列。
+农历纪念日使用 `lunar_python>=1.4.8`，生活时区使用 `tzdata>=2024.1`，图片处理使用 `Pillow>=10.0`。插件已适配 MaiBot SDK 2.21、2.22 和 2.23 系列。
 
 1. 下载 Release 安装包，解压到 MaiBot 的 `plugins/MaiWeave` 目录，该目录下应直接包含 `_manifest.json` 和 `requirements.txt`。
 2. 在 **MaiBot 根目录**打开终端，用 uv 将插件依赖安装到 MaiBot 的虚拟环境：
@@ -252,12 +268,12 @@ uv pip install --python .venv -r plugins/MaiWeave/requirements.txt
 
 ## 📚 想了解更多
 
-设置和操作步骤都放在 [文档目录](https://github.com/ilworkcn/MaiWeave/blob/main/docs/README.md) 中：
+设置和操作步骤都放在 [文档目录](docs/README.md) 中：
 
-- [使用手册](https://github.com/ilworkcn/MaiWeave/blob/main/docs/使用手册.md)：日程、阅读、生日提醒等操作。
-- [配置指南](https://github.com/ilworkcn/MaiWeave/blob/main/docs/配置指南.md)：配置项、默认值与连接设置。
-- [功能与数据说明](https://github.com/ilworkcn/MaiWeave/blob/main/docs/架构与接口.md)：日程、经历、聊天与记忆如何配合。
-- [只读状态 API](https://github.com/ilworkcn/MaiWeave/blob/main/docs/只读状态API.md)：两个只读接口的调用方式、完整字段与场景示例。
+- [使用手册](docs/使用手册.md)：日程、阅读、生日提醒等操作。
+- [配置指南](docs/配置指南.md)：配置项、默认值与连接设置。
+- [功能与数据说明](docs/架构与接口.md)：日程、经历、聊天与记忆如何配合。
+- [只读状态 API](docs/只读状态API.md)：两个只读接口的调用方式、完整字段与场景示例。
 
 运行明细每天按保留天数和条数整理，可在「经历与记忆」预览清理；日记、空间发布记录和阅读笔记长期保存。
 
