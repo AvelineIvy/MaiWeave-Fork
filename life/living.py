@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 from ..config import MaiWeaveConfig
 from ..core.engine import LifeEngine
-from ..core.models import ActivityChoice, PlanInput
+from ..core.models import SHARE_REPLY_PAUSE, ActivityChoice, PlanInput
 from .anniversaries import Anniversaries
 from .greetings import Greetings
 from .presence import Presence
@@ -383,14 +383,14 @@ class Living:
                             store.delete("book_note", plan["id"])
                     plan.update(pay=0, hourly_pay=0, cost=0, purchase_request="", groceries=0, food="")
                     plan.pop("shift_scene", None)
-                    plan.pop("shift_started", None)
+                    plan.pop("shift_retry_at", None)
                     plan.update(title="室内休息" if state["energy"] < 25 or state["stress"] >= 70 else "室内休闲",
                                 kind="rest" if state["energy"] < 25 or state["stress"] >= 70 else "leisure",
                                 location=self.spatial.place("home")["name"], goal_id="", goal_step_id="", book_id="", continuation_id="", research_query="")
                 start += timedelta(minutes=self.spatial.route(state["location"], plan["location"])["minutes"])
             plan.update(start=start.isoformat(), end=(start + duration).isoformat(), status="scheduled", motivation=why)
             plan["changes"].append({"at": now.isoformat(), "action": "动态调整", "before": before, "reason": why})
-            change = {"id": f"{plan['id']}:{len(plan['changes'])}", "session_id": plan["session_id"], "plan_id": plan["id"],
+            change = {"id": uuid4().hex, "session_id": plan["session_id"], "plan_id": plan["id"],
                       "title": plan["title"], "reason": why, "before": before, "at": now.isoformat()}
             with store.db:
                 store.put("plan", plan)
@@ -646,7 +646,8 @@ class Living:
                 f"最近几顿按从近到远：{meals}。最近两次买菜：{groceries_bought}。"
                 "买菜前想想接下来想做哪道菜；连着吃了几顿相似的，结合口味和余粮选今天想吃的。"
                 "外食按想吃的东西、店里供应什么、路程和下一项安排选地方；赶时间可以买现成的，有空可以坐下点餐。"
-                "买菜可作独立活动，标题写买什么，groceries填能做几餐，cost填总价。食材快用尽时可以顺路补货。"
+                "临近饭点想想眼下怎么吃；下班或散步回家时，也可以为下一顿打算。冰箱见底时，看看沿路哪家店卖合适的食材、下一餐有没有时间下厨。"
+                "决定顺路买菜时可单独安排，标题写买什么，groceries填能做几餐，cost填总价。"
                 "food按实际选：做好留餐、现做现吃、吃留餐、外食、受招待、备料。切洗食材选备料。吃刚做好的饭选吃留餐。"
                 "外卖和买早餐属于外食。受招待要有具体的请客或供餐依据。其他活动food留空。"
                 f"钱包有{wallet.account()['balance']}{wallet.currency_name}。{wallet.rent_note()} 每单位按人民币1元估价，已知标价优先。早餐5～12、简餐15～30、饮料3～15、少量食材10～30、日用品或手工材料10～50，按品类和数量估总价。买东西或外食时cost填实际花费，取快递或使用已有物品填0。房租由钱包按月支付，车费沿用路线。"
@@ -1016,7 +1017,7 @@ class Living:
                     continue
             replies = [engine.time(r["responded_at"]) for r in engine.store.all("share_receipt")
                        if r["session"] == session and r.get("responded_at") and r.get("followup") == "answered"]
-            if replies and now < max(replies) + timedelta(minutes=20):
+            if replies and now < max(replies) + SHARE_REPLY_PAUSE:
                 record("接着聊", "对方刚接上上次分享，先延续当前话题；20分钟后再选择新的主动话题", session)
                 continue
             sent = engine.store.find("sharing", session) or {"id": session, "experience_ids": []}

@@ -10,6 +10,26 @@ from maiweave.core.models import ActivityOutcome, Occupation, PlanInput, ShiftSc
 from test_plugin import plugin
 
 
+async def test_ongoing_shift_recovers_after_model_failure(plugin, monkeypatch):
+    p = plugin
+    now = p.engine.time(p.engine.state()["updated_at"])
+    plan = p.engine.create_plan(PlanInput(title="书店理货", kind="work", start=now.isoformat(),
+        end=(now + timedelta(hours=1)).isoformat()), "", now)
+    now += timedelta(minutes=1)
+    p.engine.advance(now)
+    scene = ShiftScene(task="整理书架", situation="日常", detail="清点书目", minutes=10, resolution="整理完一排")
+    ask = AsyncMock(side_effect=[RuntimeError("模型服务暂时中断"), scene])
+    monkeypatch.setattr(p.continuity, "ask", ask)
+    with pytest.raises(RuntimeError, match="模型服务暂时中断"):
+        await p.continuity.process(now)
+    await p.continuity.process(now + timedelta(minutes=1))
+    assert ask.await_count == 1
+    await p.continuity.process(now + timedelta(minutes=5))
+    await p.continuity.process(now + timedelta(minutes=6))
+    assert ask.await_count == 2
+    assert p.store.get("plan", plan["id"])["shift_scene"]["task"] == "整理书架"
+
+
 async def test_weekly_class_handoff(plugin, monkeypatch):
     p = plugin
     first = p.engine.time(p.engine.state()["updated_at"])

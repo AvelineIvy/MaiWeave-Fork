@@ -5,7 +5,7 @@ import json
 from datetime import date, datetime, time, timedelta
 
 from pydantic import BaseModel, Field
-from ..integrations.chat_context import brief, dump
+from ..integrations.chat_context import brief, dump, select_fields
 from ..core.models import PlanInput
 from ..integrations.usage import generate
 from .living import in_hours, next_bedtime
@@ -28,7 +28,17 @@ def writing_material(material):
     for key, budget in budgets.items():
         result[key] = []
         for row in material.get(key, []):
-            item = brief({k: v for k, v in row.items() if k != "sources"}, 500, 6)
+            if key == "活动":
+                item = select_fields(row, ("title", "kind", "status", "start", "end", "location", "food"))
+                scene = row.get("shift_scene") or {}
+                if scene.get("task"):
+                    item["手头的事"] = scene["task"]
+                    item["进展"] = scene.get("resolution") if scene.get("done") else scene.get("detail", "")
+            elif key == "经历":
+                item = select_fields(row, ("occurred_at", "summary", "source", "details"))
+            else:
+                item = {k: v for k, v in row.items() if k != "sources"}
+            item = brief(item, 500, 6)
             if len(dump([*result[key], item])) <= budget:
                 result[key].append(item)
     return result
@@ -136,16 +146,21 @@ class Diary:
             return
         store = self.engine.store
         day = now.date().isoformat()
+        plans = store.all("plan")
         if any(p["kind"] == "diary" and (p.get("diary_day") or p["start"][:10]) == day
-               and p["status"] != "cancelled" for p in store.all("plan")):
+               and p["status"] != "cancelled" for p in plans):
             return
+        limit = datetime.combine(now.date() + timedelta(days=2), time.min, tzinfo=now.tzinfo) + timedelta(minutes=20)
+        occupied = [{key: p[key] for key in ("title", "start", "end")} for p in plans
+                    if p["status"] in {"scheduled", "active"} and self.engine.time(p["end"]) > now
+                    and self.engine.time(p["start"]) < limit]
         prompt = (
             "为角色安排今天写生活日记的时间窗口，结合当前时间、作息和已有日程，选择未来空闲的10到20分钟。"
             "临近午夜时可安排到次日。输出 JSON：start、end（带时区的ISO时间）、reason（选择这个时间的理由）。"
             "作息开启时，日记放在睡前收尾之前完成，给入睡前留30分钟洗漱和放松；今晚空档不足就选醒来后的空闲。"
             f"下一次入睡：{bedtime.isoformat() if bedtime else '未设置待进入的睡眠'}；"
             f"现在：{now.isoformat()}；睡眠时间：{self.config.life.sleep_hour}至{self.config.life.wake_hour}；"
-            f"遵循作息：{self.config.life.schedule_enabled}；已有日程：{json.dumps([p for p in store.all('plan') if p['status'] in {'scheduled', 'active'}], ensure_ascii=False)}"
+            f"遵循作息：{self.config.life.schedule_enabled}；已有日程：{json.dumps(occupied, ensure_ascii=False)}"
         )
         def validate(slot):
             start, end = self.engine.time(slot.start), self.engine.time(slot.end)

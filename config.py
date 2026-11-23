@@ -10,6 +10,10 @@ from zoneinfo import available_timezones
 from .core.wallet import OPENING_BALANCE
 
 
+DEFAULT_WAKE_HOUR = 7
+DEFAULT_SLEEP_HOUR = 23
+
+
 def setting(label: str, **kwargs):
     """使用 SDK 的字段元数据指定中文显示名称。"""
     extra = kwargs.pop("json_schema_extra", {})
@@ -33,8 +37,8 @@ class LifeConfig(PluginConfigBase):
     enabled: bool = setting("启用生活引擎", default=True, description="控制生活推进和对话工具")
     currency_name: str = setting("货币名称", default="虚拟元", min_length=1, pattern=r"\S", description="显示在金额后的名称，例如麦币、星星。")
     opening_balance: int = setting("起始存款", default=OPENING_BALANCE, ge=0, description="每单位参照人民币 1 元的购买力。第一笔收支前可调整，开始记账后按实际收支计算余额。")
-    monthly_rent: int = setting("每月房租", default=0, ge=0, description="按月从存款支付，填 0 停止产生新账单。")
-    monthly_utilities: int = setting("每月生活杂费", default=0, ge=0, description="水电、燃气和网络的每月合计，与房租同日结算。填 0 关闭。")
+    monthly_rent: int = setting("每月房租", default=0, ge=0, description="填麦麦实际承担的月租。月收入约 3500 元的合租角色可参考 1600 元，免租填 0。")
+    monthly_utilities: int = setting("每月生活杂费", default=0, ge=0, description="填每月水电、燃气和网络的合计，与房租同日结算。自己承担时可参考 180 元，已包在租金里可填 0。")
     rent_day: int = setting("交租日", default=1, ge=1, le=31, description="每月几号交租。遇到短月份，在当月最后一天交。")
     autonomous: bool = setting("自主安排活动", default=True, description="空闲时由角色选择活动")
     timezone: str = setting("生活时区（必填）", default="Asia/Shanghai", description="已填中国标准时间，可直接使用；其他地区例如 Asia/Tokyo。")
@@ -47,8 +51,8 @@ class LifeConfig(PluginConfigBase):
     private_wake_probability: int = setting("私聊消息唤醒概率（%）", default=0, ge=0, le=100, description="开启聊天唤醒后，睡眠静默期间每轮普通私聊按此概率醒来。0 为关闭，100 为每轮都会醒来；午睡和夜间共用，醒来后沿用清醒时长。")
     wake_keywords: list[str] = setting("唤醒关键词（选填）", default_factory=lambda: ["心情不好", "难过", "很低落", "睡不着", "想找人聊聊", "陪陪我"], description="每项填写一个词。聊天中出现这些词时唤醒角色；可增删默认词，清空词表可关闭匹配。")
     wake_minutes: int = setting("唤醒后保持清醒（分钟）", default=60, ge=1, le=1440, description="同一个人在群聊或私聊继续聊天都会延长清醒时间；道晚安时先完成本轮回复再续睡，清醒时间到期后也会继续剩余睡眠。")
-    sleep_hour: int = setting("习惯入睡时间（整点）", default=23, ge=0, le=23, description="夜间睡眠窗口开始时间")
-    wake_hour: int = setting("习惯起床时间（整点）", default=7, ge=0, le=23, description="夜间睡眠窗口结束时间")
+    sleep_hour: int = setting("习惯入睡时间（整点）", default=DEFAULT_SLEEP_HOUR, ge=0, le=23, description="夜间睡眠窗口开始时间")
+    wake_hour: int = setting("习惯起床时间（整点）", default=DEFAULT_WAKE_HOUR, ge=0, le=23, description="夜间睡眠窗口结束时间")
     tick_seconds: int = setting("状态更新间隔（秒）", default=60, ge=10, description="每次推进生活的间隔")
     planning_interval_minutes: int = setting("自主规划间隔（分钟）", default=30, ge=5, description="生活情况保持一致时的规划间隔；活动结束、日程与目标变化会触发新规划。")
     background: str = setting("生活背景（选填）", default="", description="留空沿用 MaiBot 人格；可补充居住环境、日常身份和生活偏好。", json_schema_extra={"x-widget": "textarea", "rows": 2, "placeholder": "例如：住在城市近郊，白天工作，晚上喜欢读书。"})
@@ -68,8 +72,8 @@ class ProactiveConfig(PluginConfigBase):
     daily_limit: int = setting("每日主动发送上限", default=4, ge=0, description="每个聊天流每天最多发送几次，分段回复计一次；实际次数取决于当天经历和待跟进事项。")
     cooldown_minutes: int = setting("主动交流间隔（分钟）", default=60, ge=1, description="两次实际发送的最短间隔")
     retry_minutes: int = setting("未发送后重新判断间隔（分钟）", default=60, ge=1, description="选择稍后交流或生成、发送失败后，同一话题等待多久再判断；到达话题截止时间后结束尝试。")
-    start_hour: int = setting("允许开始时间（整点）", default=9, ge=0, le=23, description="经历分享与提醒的时间窗口起点；早晚安跟随作息。")
-    end_hour: int = setting("允许结束时间（整点）", default=22, ge=0, le=23, description="经历分享与提醒的时间窗口终点；早晚安跟随作息。")
+    start_hour: int = setting("允许开始时间（整点）", default=DEFAULT_WAKE_HOUR, ge=0, le=23, description="经历分享与提醒的时间窗口起点；早晚安跟随作息。")
+    end_hour: int = setting("允许结束时间（整点）", default=DEFAULT_SLEEP_HOUR, ge=0, le=23, description="经历分享与提醒的时间窗口终点；早晚安跟随作息。")
 
 
 class MemoryConfig(PluginConfigBase):
@@ -206,7 +210,7 @@ class RetentionConfig(PluginConfigBase):
     image_days: int = setting("生活图片保留天数", default=90, ge=1, description="空间随笔、聊天图片和已有日记图片共用，超期清理图片，正文和发布记录继续保留。")
     image_count: int = setting("生活图片数量上限", default=500, ge=1, description="三类图片合计，超出后从最旧的图片开始清理。")
     image_max_mb: int = setting("生活图片容量上限（MiB）", default=1024, ge=1, description="配图原文件的总容量；每次生成后检查上限，每日清理同时处理过期图片和遗留文件。")
-    log_days: int = setting("运行记录保留天数", default=7, ge=0, description="主动交流回执、已结束任务、资料核对、情绪变化及已结束跟进记录；0 表示按数量管理。")
+    log_days: int = setting("运行记录保留天数", default=7, ge=0, description="适用于运行日志、交流回执、情绪和跟进记录、钱包明细及中断的书籍上传。填 0 关闭期限限制。")
     log_count: int = setting("每类运行记录上限", default=1000, ge=0, description="每类分别计数；0 表示按天数管理，两项均为 0 时长期保留。")
     usage_days: int = setting("模型调用明细保留天数", default=30, ge=0, description="Token 统计按保留的明细汇总；0 表示按数量管理。")
     usage_count: int = setting("模型调用明细条数上限", default=10000, ge=0, description="保留最近的调用明细；0 表示按天数管理，两项均为 0 时长期保留。")
@@ -216,7 +220,7 @@ class RetentionConfig(PluginConfigBase):
     experience_count: int = setting("普通经历条数上限", default=3000, ge=0, description="优先清理最早发生的普通经历；0 表示按天数管理。")
     world_days: int = setting("网络资料保留天数", default=30, ge=1, description="资讯、检索、网页与地点搜索缓存的保留时间；活动感想与来源随经历继续保存。")
     world_count: int = setting("每类网络资料条数上限", default=300, ge=20, description="资讯、检索、网页与地点搜索分别计数，优先清理最早获取的资料。")
-    history_count: int = setting("每条记录保留历史条数", default=10, ge=0, description="经历修订、关系变化和目标分解分别保留最近的历史；0 表示保留全部版本。")
+    history_count: int = setting("每条记录保留历史条数", default=10, ge=0, description="日程修改、经历修订、关系变化、目标分解和偏好依据各保留最近几条。填 0 保留全部。")
 
 
 MODEL_FEATURES = {

@@ -242,6 +242,10 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         self.last_errors = {}
         self.planning_status = "等待首次规划检查"
         self.jobs = set()
+        with self.store.db:
+            for job in self.store.all("job"):
+                if job["status"] == "进行中":
+                    self.store.put("job", {**job, "status": "已取消", "error": "任务随上次插件运行结束"})
         self.background = {}
         self.next_share_check = None
         self.worker = asyncio.create_task(self.run_life(), name="maiweave-life")

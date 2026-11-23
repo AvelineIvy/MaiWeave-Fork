@@ -118,6 +118,7 @@ class Wallet:
             for row in requests:
                 if row["status"] in {"待询问", "答应稍后给"}:
                     row["status"] = "已够用"
+                    row["updated_at"] = now.isoformat()
                 self.store.put("money_request", row)
             rent["pending"].pop(0)
         if previous_due != rent["next"] or previous_count != len(rent["pending"]):
@@ -253,6 +254,7 @@ class Wallet:
                 paid = min(request["owed"], available)
                 self._post("还款:" + plan["id"] + ":" + request["id"], -paid, "归还借款 · " + request["title"], now, request["session"], request["user"])
                 request["owed"] -= paid
+                request["updated_at"] = now.isoformat()
                 available -= paid
                 if not request["owed"]:
                     request["status"] = "已还清"
@@ -303,6 +305,7 @@ class Wallet:
                         row["status"] = "已过期"
                     else:
                         continue
+                    row["updated_at"] = now.isoformat()
                     self.store.put("money_request", row)
 
     def pending(self, now):
@@ -381,7 +384,7 @@ class Wallet:
                     raise ValueError(f"这笔生活费还差{limit}{self.currency_name}，请核对金额")
                 row["amount"] = amount or limit
                 self._post("来款:" + key, row["amount"], status + " · " + row["title"], now, session, user)
-            row.update(status=status, owed=row["amount"] if action == "lend" else 0)
+            row.update(status=status, owed=row["amount"] if action == "lend" else 0, updated_at=now.isoformat())
             self.store.put("money_request", row)
             if action in {"lend", "give"}:
                 self._settle_monthly_bills(now)

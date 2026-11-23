@@ -58,7 +58,8 @@ class Continuity:
                 and (current["kind"] == "work" or current["kind"] == "study" and current.get("routine_id"))
                 and not current.get("book_id") and not current.get("research_query")
                 and current["status"] == "active" and current["simulation"] and not current["participants"]
-                and not current.get("shift_started")):
+                and not current.get("shift_scene")
+                and (not current.get("shift_retry_at") or self.engine.time(current["shift_retry_at"]) <= now)):
             await self.start_shift(current, now)
         if self.config.continuity.goal_planning:
             pending = [g for g in store.all("goal") if g["status"] == "active" and not g.get("steps")
@@ -77,7 +78,7 @@ class Continuity:
     async def start_shift(self, plan, now):
         store = self.engine.store
         with store.db:
-            plan["shift_started"] = True
+            plan["shift_retry_at"] = (now + timedelta(minutes=5)).isoformat()
             store.put("plan", plan)
         background = await self.work_background()
         place = next((p for p in store.all("place") if p["name"] == plan["location"]), {})
@@ -126,6 +127,7 @@ class Continuity:
             stress += 2
         scene["relief"] = min(3, stress)
         with store.db:
+            current.pop("shift_retry_at", None)
             current["shift_scene"] = scene
             store.put("plan", current)
             if stress:

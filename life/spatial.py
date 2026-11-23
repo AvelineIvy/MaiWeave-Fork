@@ -34,13 +34,20 @@ class Spatial:
                 elif state["location"] not in {p["name"] for p in store.all("place")}:
                     store.put("place", {"id": uid(), "name": state["location"], "outdoor": False, "description": "从已有生活状态保留的地点，请补充环境与路线"})
 
-        if not store.find("runtime", "neighborhood_shop"):
+        basic_supplies = "住宅街口的小店，卖鸡蛋、挂面、速冻食品、早餐和日用品，也可以取快递。"
+        shop_record = store.find("runtime", "neighborhood_shop")
+        if shop_record:
+            shop = store.find("place", shop_record["place_id"])
+            if shop and shop["name"] == "楼下便利店" and shop.get("description") == "住宅街口的小店，可以买早餐、补日用品，也可以顺路取快递。":
+                with store.db:
+                    store.put("place", {**shop, "description": basic_supplies})
+        else:
             with store.db:
                 places = store.all("place")
                 shop = next((p for p in places if "便利店" in p["name"] or "便利商店" in p["name"]), None)
                 if not shop:
                     shop = store.put("place", {"id": uid(), "name": "楼下便利店", "outdoor": False,
-                                               "description": "住宅街口的小店，可以买早餐、补日用品，也可以顺路取快递。"})
+                                               "description": basic_supplies})
                 if any(p["id"] == "street" for p in places) and not any(
                     shop["id"] in (r["origin"], r["destination"]) for r in store.all("route")
                 ):

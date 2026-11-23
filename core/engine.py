@@ -204,7 +204,7 @@ class LifeEngine:
             updated["pay"] = round(updated["hourly_pay"] * (end - start).total_seconds() / 3600)
         if any(updated[k] != plan[k] for k in ("kind", "title", "location", "start")):
             updated.pop("shift_scene", None)
-            updated.pop("shift_started", None)
+            updated.pop("shift_retry_at", None)
         updated["changes"].append({"at": now.isoformat(), "before": {k: plan[k] for k in changes}, "after": changes})
         if "start" in changes or updated["status"] == "blocked":
             updated["status"] = "scheduled"

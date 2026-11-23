@@ -32,6 +32,9 @@ class Reviews:
                 if record["status"] == "检查中":
                     record.update(status="失败", error="插件已重新加载，本次核对已中断，请重新提交。")
                     plugin.store.put("review", record)
+                elif record["status"] in {"待写入", "写入中"}:
+                    record.update(status="失败", error="写入流程随上次运行结束，请先核对已保存的内容。")
+                    plugin.store.put("review", record)
 
     def create(self, action, payload, session=""):
         if action not in {"profile", "anniversary", "delete_profile", "delete_anniversary", "edit_person", "sync"}:

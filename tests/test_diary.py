@@ -3,12 +3,23 @@ import json
 from datetime import timedelta
 import pytest
 from maiweave.core.models import PlanInput
+from maiweave.life.diary import writing_material
 from test_plugin import plugin
 
 
 def history(plugin, at):
     with plugin.store.db:
         plugin.store.put("state_history", {"id": at.isoformat(), "at": at.isoformat(), "energy": 60, "mood": 10})
+
+
+def test_busy_day_includes_evening_and_hides_unfinished_shift_result():
+    plans = [{"title": f"当天活动{i}", "status": "completed", "motivation": "背景" * 250}
+             for i in range(20)]
+    plans.append({"title": "晚班理货", "status": "active", "shift_scene": {
+        "task": "清点新书", "detail": "刚打开箱子", "resolution": "稍后才清点完毕"}})
+    material = writing_material({"活动": plans})
+    assert len(material["活动"]) == 21
+    assert material["活动"][-1] == {"title": "晚班理货", "status": "active", "手头的事": "清点新书", "进展": "刚打开箱子"}
 
 
 async def test_model_arranges_diary_and_only_writes_in_window(plugin):
@@ -36,6 +47,21 @@ async def test_manual_diary_occupies_real_schedule(plugin):
     plan=await plugin.ui_write_diary()
     assert plan["kind"]=="diary"
     assert plugin.engine.time(plan["end"])-plugin.engine.time(plan["start"])==timedelta(minutes=15)
+
+
+async def test_diary_arrangement_only_shows_relevant_busy_windows(plugin):
+    now = plugin.now().replace(hour=12, minute=0, second=0, microsecond=0)
+    for days, title in [(1, "明天下午的排班"), (5, "下周的排班")]:
+        start = now + timedelta(days=days, hours=3)
+        plugin.engine.create_plan(PlanInput(title=title, kind="work", start=start.isoformat(),
+            end=(start + timedelta(hours=1)).isoformat(), motivation="班次内部细节"), "", now)
+    start = now + timedelta(hours=2)
+    plugin.ctx.llm.generate.return_value = {"success": True, "response": json.dumps(
+        {"start": start.isoformat(), "end": (start + timedelta(minutes=15)).isoformat(), "reason": "午后空闲"})}
+    await plugin.diary.arrange(now, plugin.spatial)
+    prompt = plugin.ctx.llm.generate.call_args.args[0]
+    assert "明天下午的排班" in prompt
+    assert "下周的排班" not in prompt and "班次内部细节" not in prompt
 
 
 async def test_diary_model_retries_empty_output(plugin):

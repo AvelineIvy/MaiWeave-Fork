@@ -12,9 +12,13 @@ class ImageRetention:
         cfg = self.config.retention
         records = [(category, row) for category in ("diary", "diary_publication", "experience_image", "image_test")
                    for row in self.store.all(category)]
-        refs = {Path(row["image_file"]).name: (category, row) for category, row in records if row.get("image_file")}
-        busy = {name for name, (_, row) in refs.items()
-                if row.get("image_status") == "生成中" or row.get("status") in {"生成中", "发布中", "待核对"}}
+        refs, busy = {}, set()
+        for category, row in records:
+            if row.get("image_file"):
+                name = Path(row["image_file"]).name
+                refs.setdefault(name, []).append((category, row))
+                if row.get("image_status") == "生成中" or row.get("status") in {"生成中", "发布中", "待核对"}:
+                    busy.add(name)
         generating = any(row.get("image_status") == "生成中" for _, row in records)
         files = sorted(self.directory.glob("*"), key=lambda path: path.stat().st_mtime)
         files = [path for path in files if path.is_file()]
@@ -31,7 +35,10 @@ class ImageRetention:
                 removed.add(path)
                 count -= 1
                 size -= sizes[path]
-        summary = dict(category="diary_images", label="生活图片（含已有日记图片）", total=len(files),
+        # 数据目录只恢复了数据库时，把缺少原图的条目恢复到可重新配图的状态。
+        missing = refs.keys() - {path.name for path in files}
+        removed.update(self.directory / name for name in missing - busy)
+        summary = dict(category="diary_images", label="生活图片（含已有日记图片）", total=len(files) + len(missing),
                        days=cfg.image_days, limit=cfg.image_count, protected=len(busy), remove=len(removed),
                        policy=f"{cfg.image_days} 天 / {cfg.image_max_mb} MiB，当前 {sum(sizes.values()) / 1024 / 1024:.1f} MiB")
         return removed, refs, summary
@@ -40,9 +47,8 @@ class ImageRetention:
         removed, refs, summary = self.collect(now)
         with self.store.db:
             for path in removed:
-                path.unlink()
-                if path.name in refs:
-                    category, row = refs[path.name]
+                path.unlink(missing_ok=True)
+                for category, row in refs.get(path.name, []):
                     for key in ("image_file", "image_mime", "image_content", "image_error"):
                         row.pop(key, None)
                     row["image_status"] = "配图已按保留设置清理"

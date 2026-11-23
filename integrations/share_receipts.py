@@ -6,7 +6,7 @@ import asyncio
 from uuid import uuid4
 from datetime import datetime, timedelta
 
-from ..core.models import ShareDecision
+from ..core.models import SHARE_CONTEXT_WINDOW, ShareDecision
 from ..core.wallet import Wallet
 from .usage import generate
 
@@ -257,7 +257,7 @@ class ShareReceipts:
 
     def context(self, session, now):
         rows = sorted((r for r in self.store.all("share_receipt") if r["session"] == session and r.get("mode") != "群聊接话" and r.get("sent_at")
-                       and timedelta() <= now - self.time(r["sent_at"], now.tzinfo) < timedelta(days=2)),
+                       and timedelta() <= now - self.time(r["sent_at"], now.tzinfo) < SHARE_CONTEXT_WINDOW),
                       key=lambda r: self.time(r["sent_at"], now.tzinfo), reverse=True)[:3]
         return [{"id": r["id"], "topic": r.get("topic", r.get("share_activity", "生活分享")), "sent_at": r["sent_at"],
                  "sent_text": r.get("sent_text", ""), "status": r.get("followup", "waiting"), "response": r.get("response", ""),

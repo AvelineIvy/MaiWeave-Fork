@@ -95,6 +95,11 @@ def test_neighborhood_shop_upgrade(life):
     x = life
     assert x.spatial.route("住处", "楼下便利店")["minutes"] == 5
     shop = x.spatial.place("楼下便利店")
+    assert "鸡蛋" in shop["description"]
+    x.spatial.save_place(shop["name"], False, "住宅街口的小店，可以买早餐、补日用品，也可以顺路取快递。", shop["id"])
+    assert Spatial(x.engine).place(shop["id"])["description"] == shop["description"]
+    x.spatial.save_place(shop["name"], False, "主要卖文具", shop["id"])
+    assert Spatial(x.engine).place(shop["id"])["description"] == "主要卖文具"
     x.spatial.save_place("街角便利店", False, "原来的店", shop["id"])
     x.spatial.save_route("street", shop["id"], 6, "步行")
     with x.store.db:

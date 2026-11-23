@@ -278,6 +278,7 @@ async def test_image_cleanup_waits_for_publication(plugin):
     with p.store.db:
         p.store.put("diary_publication", {"id": "old", "status": "发布中", "content": "空间正文",
                                          "image_file": "diary_images/publishing.png"})
+        p.store.put("image_test", {"id": "recent", "image_file": "diary_images/publishing.png"})
     p.retention.clean(now)
     assert path.exists()
     with p.store.db:
@@ -285,3 +286,134 @@ async def test_image_cleanup_waits_for_publication(plugin):
     p.retention.clean(now)
     assert not path.exists()
     assert p.store.get("diary_publication", "old")["status"] == "已发布"
+    assert "image_file" not in p.store.get("diary_publication", "old")
+    assert "image_file" not in p.store.get("image_test", "recent")
+
+
+async def test_wallet_retention_keeps_balances_order_and_delivery(plugin):
+    p = plugin
+    now = p.now()
+    old = now - timedelta(days=200)
+    w = p.engine.wallet
+    with p.store.db:
+        for key, status, owed in [("甲", "借入", 7), ("乙", "已还清", 0), ("丙", "已还清", 0)]:
+            p.store.put("money_request", {"id": key, "session": key, "source_session": key, "purpose": "车费",
+                        "title": "车费", "user": key, "date": old.date().isoformat(), "status": status, "amount": 10, "owed": owed})
+            w._post("来款:" + key, 10, "借到车费", old, key, key)
+        p.store.put("share_receipt", {"id": "已报信", "session": "甲", "record_id": "installment:7:甲",
+                    "outcome": "实际已发送", "created": old.isoformat(), "sent_at": old.isoformat(), "settled": True})
+        p.store.put("sharing", {"id": "乙", "notice_ids": ["repayment:乙"], "experience_ids": []})
+        w._post("消费:旧早餐", -8, "早餐", old)
+        w._post("消费:新早餐", -6, "早餐", now)
+    before = w.account()
+    preview = p.retention.preview(now)
+    assert not p.store.find("sharing", "甲")
+    assert p.retention.clean(now)["removed"] == preview["total"]
+    assert w.account() == before
+    assert not p.store.find("payment", "消费:旧早餐")
+    assert p.store.find("payment", "来款:甲") and p.store.find("payment", "消费:新早餐")
+    assert p.store.get("money_request", "甲")["owed"] == 7
+    assert not p.store.find("share_receipt", "已报信")
+    assert "installment:7:甲" in p.store.get("sharing", "甲")["notice_ids"]
+    assert not p.store.find("money_request", "乙") and not p.store.find("sharing", "乙")
+    assert p.store.find("money_request", "丙")
+    assert p.retention.preview(now)["total"] == 0
+
+
+async def test_clean_finished_memory_and_interrupted_upload(plugin):
+    import os
+    p = plugin
+    now = p.now()
+    old = now - timedelta(days=200)
+    past, future = event(p, old), event(p, old, "下个月再去看花")
+    with p.store.db:
+        for row, next_action in [(past, ""), (future, "去看花")]:
+            p.store.put("activity_memory", {"id": row["id"], "experience_id": row["id"],
+                        "updated_at": old.isoformat(), "next_action": next_action,
+                        "next_date": (now + timedelta(days=30)).date().isoformat() if next_action else ""})
+        for key, active, enabled in [("曾经散步", False, True), ("常做早餐", True, True), ("已忽略", False, False)]:
+            p.store.put("habit", {"id": key, "active": active, "enabled": enabled, "last_seen": old.isoformat()})
+    stale, fresh = [p.books.begin(name, "", "")["id"] for name in ["旧书.txt", "新书.txt"]]
+    path = p.books.directory / (stale + ".txt")
+    os.utime(path, (old.timestamp(), old.timestamp()))
+    fresh_path = p.books.directory / (fresh + ".txt")
+    os.utime(fresh_path, (now.timestamp(), now.timestamp()))
+    p.retention.clean(now)
+    assert not path.exists() and not p.store.find("book_upload", stale)
+    assert fresh_path.exists() and p.store.find("book_upload", fresh)
+    assert not p.store.find("activity_memory", past["id"]) and not p.store.find("experience", past["id"])
+    assert p.store.find("activity_memory", future["id"]) and p.store.find("experience", future["id"])
+    assert not p.store.find("habit", "曾经散步")
+    assert p.store.find("habit", "常做早餐") and p.store.find("habit", "已忽略")
+
+
+async def test_low_limits_keep_food_budget_and_latest_work_progress(plugin):
+    p, now = plugin, plugin.now()
+    p.config.retention.plan_count = p.config.retention.plan_days = 1
+    p.config.rhythm.learning_days = 3
+    with p.store.db:
+        p.store.put("routine", {"id": "月班", "status": "active"})
+        for key, days, extra in [("午餐", 7, {"kind": "meal", "cost": 18}),
+                                 ("上月", 35, {"kind": "work", "routine_id": "月班", "shift_scene": {"done": True}}),
+                                 ("上上月", 65, {"kind": "work", "routine_id": "月班", "shift_scene": {"done": True}})]:
+            at = (now - timedelta(days=days)).isoformat()
+            p.store.put("plan", {"id": key, "status": "completed", "start": at, "end": at, **extra})
+    before = p.engine.wallet.spending_room(now, p.store.all("plan"))
+    p.retention.clean(now)
+    assert p.engine.wallet.spending_room(now, p.store.all("plan")) == before
+    assert p.store.find("plan", "上月") and not p.store.find("plan", "上上月")
+
+
+async def test_reload_releases_interrupted_jobs_and_reviews(plugin):
+    p = plugin
+    old = (p.now() - timedelta(days=30)).isoformat()
+    with p.store.db:
+        p.store.put("job", {"id": "旧任务", "created_at": old, "status": "进行中"})
+        for status in ("待确认", "检查中", "待写入", "写入中"):
+            p.store.put("review", {"id": status, "created_at": old, "status": status})
+    await p.on_unload()
+    await p.on_load()
+    assert p.store.get("job", "旧任务")["status"] == "已取消"
+    assert all(p.store.get("review", key)["status"] == "失败" for key in ("检查中", "待写入", "写入中"))
+    p.retention.clean(p.now())
+    assert not p.store.find("job", "旧任务")
+    assert [r["id"] for r in p.store.all("review")] == ["待确认"]
+
+
+async def test_cleanup_respects_chat_processing_windows(plugin):
+    p, now = plugin, plugin.now()
+    p.config.retention.log_days = p.config.retention.log_count = 1
+    with p.store.db:
+        for session, hours, pending in [("旧", 72, False), ("刚看过", 1, False), ("待处理", 80, True)]:
+            p.chat_schedule.mark(session, now - timedelta(hours=hours))
+            row = p.store.get("runtime", "chat_schedule:" + session)
+            p.store.put("runtime", {**row, "pending": pending})
+        for hours in (4, 36, 48.1, 50):
+            at = (now - timedelta(hours=hours)).isoformat()
+            p.store.put("share_receipt", {"id": str(hours), "created": at, "sent_at": at,
+                        "session": "测试私聊", "outcome": "实际已发送",
+                        **({"followup": "answered", "responded_at": (now - timedelta(minutes=12)).isoformat()} if hours == 48.1 else {})})
+    p.retention.clean(now)
+    assert not p.store.find("runtime", "chat_schedule:旧")
+    assert all(p.store.find("runtime", "chat_schedule:" + k) for k in ("刚看过", "待处理"))
+    assert {r["id"] for r in p.living.receipts.context("测试私聊", now)} == {"4", "36"}
+    assert not p.store.find("share_receipt", "50")
+    assert p.store.find("share_receipt", "48.1")
+    p.retention.clean(now + timedelta(minutes=9))
+    assert not p.store.find("share_receipt", "48.1")
+
+
+async def test_missing_picture_can_be_generated_again_after_cleanup(plugin):
+    p, now = plugin, plugin.now()
+    with p.store.db:
+        p.store.put("diary_publication", {"id": "草稿", "status": "草稿", "content": "今天做了蛋包饭",
+                    "image_file": "diary_images/lunch.png", "image_prompt": "盘里的蛋包饭", "image_status": "已生成"})
+        p.store.put("image_test", {"id": "测试图", "image_file": "diary_images/lunch.png"})
+        p.store.put("experience_image", {"id": "已删除的经历", "image_file": "diary_images/missing.png"})
+    preview = p.retention.preview(now)
+    assert p.retention.clean(now)["removed"] == preview["total"]
+    draft = p.store.get("diary_publication", "草稿")
+    assert draft["image_prompt"] == "盘里的蛋包饭" and draft["content"] == "今天做了蛋包饭"
+    assert "image_file" not in draft and "image_file" not in p.store.get("image_test", "测试图")
+    assert not p.store.find("experience_image", "已删除的经历")
+    assert p.retention.preview(now)["total"] == 0

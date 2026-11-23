@@ -1,6 +1,6 @@
 """生活业务模型；时间统一保存为带时区的 ISO 字符串。"""
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field, model_validator
 
 Kind = Literal["sleep", "cook", "meal", "work", "study", "leisure", "travel", "rest", "social", "diary"]
 Source = Literal["reported", "observed", "simulated"]
+SHARE_CONTEXT_WINDOW = timedelta(days=2)
+SHARE_REPLY_PAUSE = timedelta(minutes=20)
 
 
 def local_time(value: str, timezone: str) -> datetime:
