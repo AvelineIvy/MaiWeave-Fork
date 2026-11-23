@@ -20,8 +20,10 @@ class ChatSchedule:
         record.update(pending=True, updated_at=now.isoformat())
         if user_id:
             record["user_id"] = str(user_id)
+            record["received_at"] = now.isoformat()
         if bot_id:
             record["bot_id"] = str(bot_id)
+            record["sent_at"] = now.isoformat()
         with store.db:
             store.put("runtime", record)
 

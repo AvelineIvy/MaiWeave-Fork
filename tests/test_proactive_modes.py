@@ -11,7 +11,7 @@ from maibot_sdk.context import PluginContext
 from maibot_sdk.capabilities.maisaka import MaisakaReplyCapability
 from maibot_sdk.capabilities.send import SendCapability
 from maiweave.config import MaiWeaveConfig
-from maiweave.core.models import ExperienceInput, PlanInput
+from maiweave.core.models import ExperienceInput, PlanInput, PlanPromise
 from maiweave.plugin import create_plugin
 from test_plugin import plugin
 
@@ -52,6 +52,37 @@ def prepare(plugin, monkeypatch):
         plugin.engine.record_experience(ExperienceInput(summary="阅读的新发现", importance=score,
             occurred_at=now.isoformat(), source="simulated", evidence="角色模拟"), "chat-a", now)
     return now
+
+
+@pytest.mark.parametrize("mode", ["自然交流", "主动表达"])
+async def test_conversation_leaves_room_for_due_promise(plugin, monkeypatch, mode):
+    from test_activity_connections import set_time
+    now = prepare(plugin, monkeypatch)
+    set_time(plugin, now)
+    plugin.config.proactive.mode = mode
+    plugin.chat_schedule.mark("chat-a", now - timedelta(minutes=2), "读者")
+    plugin.chat_schedule.mark("chat-a", now - timedelta(minutes=1), bot_id="麦麦")
+    await plugin.living.share(now)
+    assert plugin.living.share_decisions[0]["outcome"] == "接着聊"
+    assert not plugin.store.all("share_receipt")
+    due = now + timedelta(minutes=5)
+    plan = plugin.engine.create_plan(PlanInput(title="核对页码", kind="study", start=now.isoformat(),
+        end=due.isoformat(), location="住处"), "chat-a", now)
+    plugin.continuity.plan_promise(PlanPromise(plan_id=plan["id"], when="completion", action="promise",
+        evidence="答应核实后回你", topic="引用在哪页"), "chat-a", now)
+    thread, = plugin.store.all("thread")
+    plugin.ctx.llm.generate.return_value = {"success": True, "response": '{"arrangements":[]}'}
+    await plugin.chat_schedule.process(due)
+    plugin.engine.advance(due)
+    await plugin.living.share(due)
+    receipt, = plugin.store.all("share_receipt")
+    assert receipt["thread_id"] == thread["id"]
+    assert receipt["mode"] == mode
+    if mode == "自然交流":
+        assert "兑现这条约定" in plugin.ctx.maisaka.proactive.trigger.await_args.args[1]
+    else:
+        prompt = plugin.ctx.maisaka.reply.generate.await_args.args[1]
+        assert "引用在哪页" in prompt and "读到哪里了" not in prompt
 
 
 async def test_expression_sent_once_with_shared_budget(plugin, monkeypatch):

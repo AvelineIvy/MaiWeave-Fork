@@ -1,6 +1,7 @@
 """自主活动与主动交流，复用 MaiBot 模型和发言机制。"""
 
 import json
+import math
 import re
 import hashlib
 import random
@@ -556,6 +557,12 @@ class Living:
                          and r.get("kind") in {"study", "work", "leisure", "rest", "cook", "meal", "social"}
                          and (not r.get("next_date") or r["next_date"] <= now.date().isoformat())]
         continuations = sorted(continuations, key=lambda row: engine.time(row["updated_at"]))[-12:]
+        completed = sorted((p for p in engine.store.all("plan") if p["status"] == "completed"),
+                           key=lambda p: engine.time(p["end"]), reverse=True)
+        last_meal_end = next((engine.time(p["end"]) for p in completed if p["kind"] == "meal"), None)
+        # 已经歇过一轮、又离上一餐较久时，把吃饭也放回这次选择。
+        reconsider_meal = (last_meal_end is not None and now - last_meal_end >= timedelta(hours=5)
+                           and completed[0]["kind"] == "rest")
         if config.schedule_enabled and in_hours(now.hour, config.sleep_hour, config.wake_hour):
             source = "日常作息"
             title, kind, location, motivation = "睡觉", "sleep", self.spatial.place("home")["name"], "按习惯休息，恢复精力"
@@ -563,15 +570,18 @@ class Living:
         elif self.bedtime(now) and (self.bedtime(now) - now).total_seconds() / 60 <= self.spatial.route(state["location"], self.spatial.place("home")["name"])["minutes"] + 10:
             source = "睡前收尾"
             title, kind, location, motivation, minutes = "回家准备休息", "rest", self.spatial.place("home")["name"], "收好手边的事，准备睡觉", free
-        elif state["energy"] <= 25 and state["hunger"] < 65:
+        elif state["energy"] <= 25 and state["hunger"] < 65 and not reconsider_meal:
             source = "身体需要 · 休息"
-            title, kind, location, motivation, minutes = "休息一会儿", "rest", state["location"], "精力不足", min(free, 45)
+            title, kind, location, motivation = "休息一会儿", "rest", state["location"], "精力不足"
+            minutes = min(free, math.ceil((30 - state["energy"]) * 60 / engine.REST_RECOVERY),
+                          int((65 - state["hunger"]) * 60 / engine.AWAKE_HUNGER) + 1)
+            if last_meal_end:
+                until_meal = (last_meal_end + timedelta(hours=5) - now).total_seconds() / 60
+                minutes = min(minutes, math.ceil(until_meal) if until_meal > 0 else 45)
         else:
             source = "身体需要 · 用餐" if state["hunger"] >= 65 else "模型自主选择"
             balance = self.activity_balance(now)
             goals = [select_fields(g, ("id", "title", "completed_sessions", "target_sessions")) for g in engine.store.all("goal") if g["status"] == "active"]
-            completed = sorted((p for p in engine.store.all("plan") if p["status"] == "completed"),
-                               key=lambda p: engine.time(p["end"]), reverse=True)
             meals = [p["title"] for p in completed if p["kind"] == "meal"][:4]
             groceries_bought = [p["title"] for p in completed if p.get("groceries")][:2]
             spending_room = wallet.spending_room(now, completed)
@@ -579,7 +589,7 @@ class Living:
             reading_seconds = sum(min(p["elapsed_seconds"], (engine.time(p["end"]) - max(window, engine.time(p["start"]))).total_seconds())
                                   for p in completed if p.get("book_id") and engine.time(p["end"]) > window)
             reading_minutes = round(reading_seconds / 60)
-            last_meal = next((engine.time(p["end"]).strftime("%m-%d %H:%M") for p in completed if p["kind"] == "meal"), "暂无记录")
+            last_meal = last_meal_end.strftime("%m-%d %H:%M") if last_meal_end else "暂无记录"
             personality = await self.ctx.config.get("personality")
             if isinstance(personality, dict):
                 personality = select_fields(personality, ("personality", "behavior_style"))
@@ -595,6 +605,12 @@ class Living:
                       and now < engine.time(p["start"])]
             shift_times = [(p["start"][:16], p["end"][11:16], p["location"]) for p in shifts[:4]]
             until_shift = int((engine.time(shifts[0]["start"]) - now).total_seconds() / 60) if shifts else 0
+            meal_window = ""
+            if shifts and until_shift <= 90 and last_meal_end:
+                hours = (engine.time(shifts[0]["end"]) - last_meal_end).total_seconds() / 3600
+                meal_window = f"如果这次空档不吃，到这班结束就离上顿饭约{hours:.1f}小时。结合路程和现有食物，考虑现在简单吃点，或收工后再吃。"
+            if reconsider_meal and state["energy"] <= 25:
+                meal_window += "刚歇过一轮，精力还低。想想附近有什么省力的吃法，仍需要恢复也可以接着休息。"
             to_shift = {r["destination"]: r["minutes"] for r in self.spatial.routes_from(shifts[0]["location"])} if shifts and shifts[0]["location"] and until_shift <= 180 else {}
             places = []
             for route in self.spatial.routes_from(state["location"]):
@@ -641,7 +657,7 @@ class Living:
                 f"本周的钱：{spending_room}，单位为{wallet.currency_name}。余款少时多用现有食材和物品。"
                 "余款宽裕时，结合口味、兴趣和手头的事决定要不要点道喜欢的菜、添点材料；没有想买的就把钱存着。"
                 f"家里的生食材够{pantry['raw']}餐，做好待吃的有{pantry['ready']}餐。"
-                f"接下来班次或课的起止和地点：{shift_times}。两班之间是空档，先扣往返路程再看够不够吃饭。"
+                f"接下来班次或课的起止和地点：{shift_times}。两班之间是空档，先扣往返路程再看够不够吃饭。{meal_window}"
                 "留餐在家里，要回家才能取用。时间紧就选赶得上的餐食；明早有安排，今晚做饭时也可以顺手备下一餐。"
                 f"最近几顿按从近到远：{meals}。最近两次买菜：{groceries_bought}。"
                 "买菜前想想接下来想做哪道菜；连着吃了几顿相似的，结合口味和余粮选今天想吃的。"
@@ -1017,9 +1033,6 @@ class Living:
                     continue
             replies = [engine.time(r["responded_at"]) for r in engine.store.all("share_receipt")
                        if r["session"] == session and r.get("responded_at") and r.get("followup") == "answered"]
-            if replies and now < max(replies) + SHARE_REPLY_PAUSE:
-                record("接着聊", "对方刚接上上次分享，先延续当前话题；20分钟后再选择新的主动话题", session)
-                continue
             sent = engine.store.find("sharing", session) or {"id": session, "experience_ids": []}
             times = self.receipts.sent_times(session, now.tzinfo)
             count = sum(at.date() == now.date() for at in times)
@@ -1110,6 +1123,17 @@ class Living:
                 if item["session_id"] == session:
                     notices.append((f"issue:{item['id']}:{item['reason']}", f"安排需要调整：{item['title']}。原因：{item['reason']}。说明当前待调整的状态。", None))
             notices = [n for n in notices if n[0] not in sent.get("notice_ids", []) and self.share_ready(n[0], session, now)]
+            if not notices:
+                if replies and now < max(replies) + SHARE_REPLY_PAUSE:
+                    record("接着聊", "对方刚接上上次分享，先延续当前话题", session)
+                    continue
+                chat = engine.store.find("runtime", "chat_schedule:" + session) or {}
+                if all(chat.get(k) and timedelta() <= now - engine.time(chat[k]) < SHARE_REPLY_PAUSE
+                       for k in ("received_at", "sent_at")):
+                    streams = await self.ctx.chat.get_all_streams(platform="all_platforms")
+                    if any(s["stream_id"] == session and not (s.get("group_id") or s.get("is_group_session")) for s in streams):
+                        record("接着聊", "私聊刚有来有回，先聊眼前的事", session)
+                        continue
             if pause:
                 notices = [n for n in notices if n[2] and n[2].get("when") in {"arrival", "task_completion"} and ordinary_hours
                            and n[2].get("plan_id") == current["id"]]
@@ -1153,7 +1177,8 @@ class Living:
                        + f"最近实际分享与回应：{json.dumps(self.receipts.context(session, now), ensure_ascii=False)}。")
             decision = None
             if notices:
-                intent = notices[0][1] + context
+                promised = notices[0][2] and notices[0][2].get("plan_id")
+                intent = notices[0][1] if promised else notices[0][1] + context
             else:
                 choices = [f"本次经历发生时间={item['occurred_at']}；来源={item['source']}；内容={item['summary']}；"
                            f"细节={json.dumps(item['details'], ensure_ascii=False)}" for item in candidates]
@@ -1199,7 +1224,7 @@ class Living:
             else:
                 try:
                     result = await self.ctx.maisaka.proactive.trigger(
-                        session, intent + "结合当前对话判断是否适合开口，可以选择沉默。",
+                        session, intent + ("现在请用 reply 兑现这条约定。" if notices and promised else "结合当前对话判断是否适合开口，可以选择沉默。"),
                         reason="MaiWeave 生活跟进", metadata={"maiweave_record_id": record_id})
                     if not result["success"]:
                         raise RuntimeError(result.get("error") or "主动交流请求失败")

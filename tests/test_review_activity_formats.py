@@ -1,10 +1,55 @@
 """资料模型输出、饥饿与活动候选的联动。"""
 import json
+from datetime import timedelta
 import pytest
 from pydantic import ValidationError
 from test_plugin import plugin
 from test_activity_connections import set_time
 from maiweave.interfaces.review import Assessment
+from maiweave.core.models import PlanInput
+
+
+@pytest.mark.parametrize("hunger,minutes", [(25, 168), (62, 37)])
+async def test_rest_ends_at_recovery_or_hunger(plugin, hunger, minutes):
+    now = plugin.now().replace(hour=12, minute=0, second=0, microsecond=0)
+    set_time(plugin, now)
+    plugin.config.life.autonomous = True
+    with plugin.store.db:
+        plugin.store.put("state", {**plugin.engine.state(), "energy": 16, "hunger": hunger})
+    await plugin.living.choose_activity(now)
+    rest = plugin.engine.current(now)
+    assert rest["kind"] == "rest"
+    for step in range(1, minutes):
+        at = now + timedelta(minutes=step)
+        plugin.engine.advance(at)
+        assert plugin.engine.current(at)["id"] == rest["id"]
+    end = now + timedelta(minutes=minutes)
+    plugin.engine.advance(end)
+    assert plugin.store.get("plan", rest["id"])["status"] == "completed"
+    assert len([e for e in plugin.store.all("experience") if e.get("plan_id") == rest["id"]]) == 1
+    if hunger == 62:
+        assert plugin.engine.state()["hunger"] >= 65
+
+
+@pytest.mark.parametrize("hours_since_meal,expected", [(2, "rest"), (6, "meal")])
+async def test_tired_after_rest_considers_time_since_meal(plugin, hours_since_meal, expected):
+    p = plugin
+    now = p.now().replace(hour=18, minute=0, second=0, microsecond=0)
+    last_meal = now - timedelta(hours=hours_since_meal)
+    start = last_meal - timedelta(minutes=20)
+    set_time(p, start)
+    for title, kind, began, ended in [("午饭", "meal", start, last_meal),
+                                      ("闭眼休息", "rest", now - timedelta(minutes=45), now)]:
+        p.engine.create_plan(PlanInput(title=title, kind=kind, start=began.isoformat(),
+                                       end=ended.isoformat(), location="住处"), "", began)
+        p.engine.advance(ended)
+    with p.store.db:
+        p.store.put("state", {**p.engine.state(), "energy": 18, "hunger": 30})
+    p.config.life.autonomous = True
+    p.ctx.llm.generate.return_value = {"success": True, "response": json.dumps({
+        "title": "煮碗面吃", "kind": "meal", "minutes": 20, "location": "住处", "motivation": "歇过了，想简单吃点"})}
+    await p.living.choose_activity(now)
+    assert p.engine.current(now)["kind"] == expected
 
 
 @pytest.mark.parametrize('hunger', [64, 65, 100])

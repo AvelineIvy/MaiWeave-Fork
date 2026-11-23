@@ -86,6 +86,9 @@ def read_life_status(store: Store, now: datetime, *, enabled: bool, schedule_ena
 
 
 class LifeEngine:
+    REST_RECOVERY = 5
+    AWAKE_HUNGER = 5
+
     def __init__(self, store: Store, timezone: str, now: datetime):
         self.store = store
         self.wallet = Wallet(store)
@@ -435,9 +438,9 @@ class LifeEngine:
             state["energy"] = bounded(state["energy"] + 10 * hours, high=max(state["energy"], rested))
         else:
             drain = {"work": 5, "study": 6, "travel": 6}.get(kind, 3)
-            state["energy"] = bounded(state["energy"] + (5 if kind == "rest" else -drain) * hours)
+            state["energy"] = bounded(state["energy"] + (self.REST_RECOVERY if kind == "rest" else -drain) * hours)
             state["sleep_debt"] = bounded(state["sleep_debt"] + hours / 2, 0, 24)
-        state["hunger"] = bounded(state["hunger"] + (2 if kind == "sleep" else 5) * hours)
+        state["hunger"] = bounded(state["hunger"] + (2 if kind == "sleep" else self.AWAKE_HUNGER) * hours)
         state["mood"] = round(state["mood"] * (0.94 ** hours), 3)
         stress_rate = {"work": 1.5, "study": 3}.get(kind, -2)
         state["stress"] = bounded(state["stress"] + stress_rate * hours)
