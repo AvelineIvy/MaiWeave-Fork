@@ -60,21 +60,27 @@ async def test_tool_round_trip_and_hook(plugin):
     now = plugin.now()
     created = await plugin.create_plan({"title": "一起看电影", "start": (now + timedelta(hours=1)).isoformat(), "end": (now + timedelta(hours=3)).isoformat(), "participants": ["用户"]}, stream_id="chat-a")
     assert created["success"]
+    assert created["content"]["model_error_receipt"].startswith("已安排「一起看电影」")
     plan_id = created["content"]["id"]
     updated = await plugin.change_plan(plan_id, "update", {"title": "一起看纪录片"}, stream_id="chat-a")
     assert updated["success"]
+    assert updated["content"]["model_error_receipt"].startswith("已修改「一起看纪录片」")
     result = await plugin.planner_context(items=[], session_id="chat-a")
     text = result["modified_kwargs"]["items"][0]["parts"][0]["text"]
     assert "一起看纪录片" in text
     reply = await plugin.reply_context(session_id="chat-a", extra_prompt="原提示")
     assert reply["modified_kwargs"]["extra_prompt"].startswith("原提示")
-    await plugin.change_plan(plan_id, "cancel", stream_id="chat-a")
+    cancel = await plugin.change_plan(plan_id, "cancel", stream_id="chat-a")
+    assert cancel["content"]["model_error_receipt"] == "已取消「一起看纪录片」。"
     assert plugin.store.get("plan", plan_id)["status"] == "cancelled"
+    assert "model_error_receipt" not in plugin.store.get("plan", plan_id)
+    plugin.ctx.send.text.assert_not_awaited()
 
 
 async def test_validation_returns_business_error(plugin):
     result = await plugin.create_plan({"title": "缺少时间"}, stream_id="chat-a")
     assert result["success"] is False
+    assert "content" not in result
 
 
 async def test_autonomous_activity_uses_host_model(plugin):

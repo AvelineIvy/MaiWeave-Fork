@@ -118,7 +118,8 @@ class ShareReceipts:
                 reference = intent
                 style = "写一条可以直接发给聊天对象的即时消息。全文一到两句话，一段纯文本。用我和你来称呼双方，按角色平时的口吻说。约好的回信直接给答案，生活分享挑一个细节；最近聊天只用来接话。"
                 if thread and thread.get("plan_id"):
-                    style = "你在私聊里兑现约定。问结果就只写一句能直接发出去的答案，答出时间、地点、数量或材料就收住。对方明确问做法，才简短讲步骤。只采用材料里已经确认的事实。"
+                    style = "交付一条发给眼前这个人的聊天气泡，直接用第一人称和对方说话。问结果就一句话答出具体结果，到句号收住；问做法才简短讲步骤。"
+                    reference = f"{style}\n这条私聊的依据：{intent}\n请直接写聊天气泡里的原话。"
                 else:
                     context = await self.recent_chat(session)
                     reference = "最近聊天：" + json.dumps(context, ensure_ascii=False) + "\n本次发言任务：" + intent

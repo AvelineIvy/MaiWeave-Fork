@@ -223,6 +223,7 @@ class ActivityMeaning(BaseModel):
 
 
 class ActivityOutcome(ActivityMeaning, SharingScore):
+    meal_ready: bool = Field(default=False, description="这次做出了留给角色自己吃的一餐")
     hourly_pay: int = Field(default=0, ge=0, description="这次经历里遇到的临时工作时薪，按钱包单位填写")
     new_followup: str = Field(default="", max_length=300, description="上一件已收尾的事接着办完后，本次新发现的下一件事")
     next_date: date | None = None

@@ -212,18 +212,22 @@ class Wallet:
         self._post("车费:" + plan["id"], -fare, plan["title"], now, plan.get("session_id", ""))
         return ""
 
-    def settle(self, plan, now):
-        """随完成记录在同一个事务里记账。"""
+    def settle_food(self, plan):
+        """把本次实际买入、做成或吃掉的餐数记入冰箱。"""
         food, bought = plan.get("food", ""), plan.get("groceries", 0)
         if bought or food in {"做好留餐", "现做现吃", "吃留餐"}:
             experience = self.store.get("experience", plan["experience_id"])
             if "家中余粮" not in experience["details"]:
                 pantry = self.pantry()
-                pantry["raw"] += bought - int(food in {"做好留餐", "现做现吃"})
+                pantry["raw"] = max(0, pantry["raw"] + bought - int(food in {"做好留餐", "现做现吃"}))
                 pantry["ready"] += int(food == "做好留餐") - int(food == "吃留餐")
                 self.store.put("runtime", pantry)
                 experience["details"]["家中余粮"] = f"食材{pantry['raw']}餐，已做好{pantry['ready']}餐"
                 self.store.put("experience", experience)
+
+    def settle(self, plan, now):
+        """随完成记录在同一个事务里记账。"""
+        self.settle_food(plan)
         fare = sum(leg.get("fare", 0) for leg in (plan.get("route") or {}).get("legs", []))
         cost = plan.get("cost", 0) + fare
         if cost or plan.get("pay"):

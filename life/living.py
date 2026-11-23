@@ -1101,7 +1101,12 @@ class Living:
                         if self.continuity.can_report(item):
                             plan = engine.store.get("plan", item["plan_id"])
                             milestone = "已经抵达" if item["when"] == "arrival" else "已经完成"
-                            if item["when"] == "task_completion":
+                            if item["when"] == "completion" and plan.get("experience_id"):
+                                event = engine.store.find("experience", plan["experience_id"])
+                                if event and engine.visible(event, session):
+                                    details = json.dumps(brief(event["details"], 120, 6), ensure_ascii=False)
+                                    milestone += f"。本次经历：{event['summary'][:240]}；记录细节：{details[:480]}"
+                            elif item["when"] == "task_completion":
                                 scene = plan["shift_scene"]
                                 milestone = f"{scene['task']}已做完：{scene['resolution']}"
                             topic = item.get("topic")

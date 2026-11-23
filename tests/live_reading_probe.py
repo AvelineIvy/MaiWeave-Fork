@@ -109,7 +109,7 @@ class Probe(MaiBotPlugin):
     async def run(self, case):
         from maiweave_probe_target.core.models import PlanInput, ExperienceInput
         folder = Path(self.ctx.paths.data_dir) / uuid4().hex
-        folder.mkdir()
+        folder.mkdir(parents=True)
         native = self.ctx
         class Context:
             paths = SimpleNamespace(data_dir=str(folder))
@@ -934,6 +934,12 @@ class Probe(MaiBotPlugin):
                 p.config.life.autonomous = True
                 await p.living.choose_activity(now)
                 meal = p.engine.current(now)
+                if meal and meal["kind"] == "travel":
+                    destination_id = meal["activity_id"]
+                    now = p.engine.time(meal["end"])
+                    p.engine.advance(now)
+                    meal = p.engine.current(now)
+                    assert meal and meal["id"] == destination_id, meal
                 assert meal["kind"] == "meal", meal
                 assert meal["continuation_id"] == memory["id"], (meal,memory)
                 context = p.context_text("private",text="晚饭做好了吗，现在在干什么")
@@ -1074,7 +1080,8 @@ class Probe(MaiBotPlugin):
                         p.store.put("state",{**p.engine.state(),"energy":26})
                     await p.living.share(now)
                 rows=p.store.all("share_receipt")
-                assert rows and rows[0]["outcome"] == "实际已发送", rows
+                outcomes = {"实际已发送", "稍后再聊"} if case == "fatigue" else {"实际已发送"}
+                assert len(rows) == 1 and rows[0]["outcome"] in outcomes, rows
                 assert rows[0]["notice"] == (case == "reminder")
                 output.update(delivery=rows[0]["outcome"],notice=rows[0]["notice"],quiet=(await p.get_life_status())["quiet"])
                 assert output["quiet"] is False

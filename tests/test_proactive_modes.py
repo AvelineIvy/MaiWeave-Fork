@@ -75,6 +75,9 @@ async def test_conversation_leaves_room_for_due_promise(plugin, monkeypatch, mod
     plugin.ctx.llm.generate.return_value = {"success": True, "response": '{"arrangements":[]}'}
     await plugin.chat_schedule.process(due)
     plugin.engine.advance(due)
+    event = plugin.store.get("experience", plugin.store.get("plan", plan["id"])["experience_id"])
+    with plugin.store.db:
+        plugin.store.put("experience", {**event, "details": {"引文页码": "第六十三页"}})
     plugin.config.proactive.daily_limit = limit
     with plugin.store.db:
         plugin.store.put("share_receipt", {"id": "previous", "session": "chat-a", "created": now.isoformat(),
@@ -90,8 +93,10 @@ async def test_conversation_leaves_room_for_due_promise(plugin, monkeypatch, mod
     assert receipt["mode"] == mode
     if mode == "自然交流":
         assert "兑现这条约定" in plugin.ctx.maisaka.proactive.trigger.await_args.args[1]
+        assert "第六十三页" in plugin.ctx.maisaka.proactive.trigger.await_args.args[1]
     else:
         prompt = plugin.ctx.maisaka.reply.generate.await_args.args[1]
+        assert "第六十三页" in prompt
         assert "引用在哪页" in prompt and "读到哪里了" not in prompt
 
 
@@ -219,7 +224,7 @@ def test_mode_config_upgrade_keeps_saved_values(old_version):
     from maibot_sdk.config import rebuild_plugin_config_data
     instance = create_plugin()
     defaults = instance.get_default_config()
-    assert defaults["plugin"]["config_version"] == "0.12.7"
+    assert defaults["plugin"]["config_version"] == "0.13.0"
     previous = deepcopy(defaults)
     previous["plugin"]["config_version"] = old_version
     previous["proactive"].pop("mode")
@@ -228,7 +233,7 @@ def test_mode_config_upgrade_keeps_saved_values(old_version):
     previous["proactive"].update(enabled=True, daily_limit=7, cooldown_minutes=45, session_ids=["chat-a"], share_threshold=6)
     previous["life"].update(timezone="Asia/Tokyo", interests=["画画"], autonomous=False)
     expected = deepcopy(previous)
-    expected["plugin"]["config_version"] = "0.12.7"
+    expected["plugin"]["config_version"] = "0.13.0"
     expected["proactive"]["mode"] = "自然交流"
     expected["proactive"]["group_enabled"] = True
     expected["life"]["sleep_skip_group_planner"] = False

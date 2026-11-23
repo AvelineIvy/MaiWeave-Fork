@@ -24,8 +24,10 @@ async def test_cooking_then_meal_reduces_hunger_only_after_eating(plugin, hunger
     end=now+timedelta(minutes=30)
     plugin.engine.advance(end)
     assert plugin.engine.state()["hunger"]==hunger+2.5
-    plugin.ctx.llm.generate.return_value={"success":True,"response":json.dumps({"activity":"烹饪","subject":"晚饭","summary":"面条刚出锅，准备坐下来吃","details":{"结果":"面条做好了"},"enjoyment":2,"importance":3,"score_reason":"做好了晚饭","completed":True,"next_action":"坐下来吃刚做好的面条"})}
+    plugin.ctx.llm.generate.return_value={"success":True,"response":json.dumps({"activity":"烹饪","subject":"晚饭","summary":"面条刚出锅，准备坐下来吃","details":{"结果":"面条做好了"},"enjoyment":2,"importance":3,"score_reason":"做好了晚饭","completed":True,"meal_ready":True,"next_action":"坐下来吃刚做好的面条"})}
     await plugin.continuity.reflect(cook["id"],end)
+    await plugin.continuity.reflect(cook["id"],end)
+    assert plugin.engine.wallet.pantry() == {"id":"pantry","raw":2,"ready":1}
     memory,=plugin.store.all("activity_memory")
     assert memory["kind"]=="cook"
     plugin.config.life.autonomous=True
@@ -42,8 +44,24 @@ async def test_cooking_then_meal_reduces_hunger_only_after_eating(plugin, hunger
     assert plugin.engine.state()["hunger"]>hunger+2.5
     plugin.engine.advance(end+timedelta(minutes=20))
     assert plugin.engine.state()["hunger"]==pytest.approx(max(0,hunger+50/12-55),abs=0.002)
+    assert plugin.engine.wallet.pantry() == {"id":"pantry","raw":2,"ready":0}
+    assert not plugin.store.all("payment")
     assert KIND["cook"]=="做饭" and KIND[meal["kind"]]=="用餐"
     assert any(row["activity"]=="烹饪" for row in plugin.living.activity_balance(end+timedelta(minutes=20))["totals"])
+
+
+@pytest.mark.parametrize("result", ["洗好了明天的菜", "做好了送给邻居的饭"])
+async def test_manual_cook_without_personal_meal(plugin, result):
+    now = start(plugin)
+    end = now + timedelta(minutes=20)
+    plan = plugin.engine.create_plan(PlanInput(title=result, kind="cook", start=now.isoformat(), end=end.isoformat()), "", now)
+    plugin.engine.advance(end)
+    plugin.ctx.llm.generate.return_value = {"success": True, "response": json.dumps({
+        "activity": "烹饪", "subject": "晚饭", "summary": result, "details": {"结果": result},
+        "enjoyment": 1, "importance": 2, "score_reason": "完成安排", "completed": True, "meal_ready": False,
+    })}
+    await plugin.continuity.reflect(plan["id"], end)
+    assert plugin.engine.wallet.pantry()["ready"] == 0
 
 
 @pytest.mark.parametrize("minutes", [10, 25, 45])

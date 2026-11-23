@@ -85,7 +85,7 @@
 18:29，麦麦正从住处走去厨房，打算用冰箱里的食材做晚饭。右边能看到还剩几餐食材、今天领了多少工钱，地图下方是她从早到晚走过的行程。
 
 <p align="center">
-  <a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-overview.png"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-overview.png" width="800" alt="麦麦正在步行去厨房，旁边显示存款与冰箱，下方是傍晚的生活地图和今天的日程"></a>
+  <a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-overview.png"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-overview.png" width="800" alt="麦麦正在步行去厨房，旁边显示存款与冰箱，下方是傍晚的生活地图和今天的日程"></a>
 </p>
 
 ### 🌇 生活地图 · 从天亮到熄灯
@@ -100,9 +100,9 @@
     <th>🌙 深夜</th>
   </tr>
   <tr>
-    <td align="center"><a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-day.webp"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-day.webp" width="180" alt="白天的街区，大学、花店和河岸步道清晰可见"></a></td>
-    <td align="center"><a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-evening.webp"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-evening.webp" width="180" alt="夜晚的同一街区，店铺、住宅窗户和路灯亮起"></a></td>
-    <td align="center"><a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-late.webp"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/life-map-late.webp" width="180" alt="深夜楼窗熄灯，道路和桥边仍亮着路灯"></a></td>
+    <td align="center"><a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-map-day.webp"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-map-day.webp" width="180" alt="白天的街区，大学、花店和河岸步道清晰可见"></a></td>
+    <td align="center"><a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-map-evening.webp"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-map-evening.webp" width="180" alt="夜晚的同一街区，店铺、住宅窗户和路灯亮起"></a></td>
+    <td align="center"><a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-map-late.webp"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/life-map-late.webp" width="180" alt="深夜楼窗熄灯，道路和桥边仍亮着路灯"></a></td>
   </tr>
   <tr>
     <td align="center">06:00–18:00</td>
@@ -117,7 +117,7 @@
 麦麦正在校对样书，你问她封底改了哪里。她约好七点四十左右来找你。19:39:55，她自己发来一句「刚收工啦，来跟你说一声」，接着讲了封底署名的事。
 
 <p align="center">
-  <a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/develop/assets/after-work-chat.png"><img src="assets/after-work-chat.png" width="620" alt="本地聊天室实机记录：麦麦答应下班后再聊，19:39:55 主动回来告诉你，封底的署名核对无误。"></a>
+  <a href="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/after-work-chat.png"><img src="https://raw.githubusercontent.com/ilworkcn/MaiWeave/main/assets/after-work-chat.png" width="620" alt="本地聊天室实机记录：麦麦答应下班后再聊，19:39:55 主动回来告诉你，封底的署名核对无误。"></a>
 </p>
 
 ### 📸 图文分享 · 做好了，想给你看看

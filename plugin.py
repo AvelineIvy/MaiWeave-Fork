@@ -636,7 +636,19 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
     @operation
     async def create_plan(self, plan: dict, **kwargs):
         value = PlanInput.model_validate(plan)
-        return self.spatial.schedule(value, kwargs["stream_id"], self.now(), user_id=kwargs.get("user_id", ""))
+        saved = self.spatial.schedule(value, kwargs["stream_id"], self.now(), user_id=kwargs.get("user_id", ""))
+        return self.plan_receipt(saved, "已安排")
+
+    def plan_receipt(self, plan: dict, action: str) -> dict:
+        """用实际保存的时间和地点生成聊天回执。"""
+        text = f"{action}「{plan['title']}」"
+        if action not in {"已取消", "已暂停"}:
+            start, end = (self.engine.time(plan[key]) for key in ("start", "end"))
+            end_format = "%H:%M" if start.date() == end.date() else "%m月%d日 %H:%M"
+            text += f"，{start:%m月%d日 %H:%M} 至 {end:{end_format}}"
+            if plan["location"]:
+                text += f"，地点是{plan['location']}"
+        return {**public_plan(plan), "model_error_receipt": text + "。"}
 
     @Tool("maiweave_change_plan", description="按事件 ID 修改、取消、暂停或恢复计划。update 时 patch 填写要改变的字段。取消保留记录，完成情况通过记录经历确认。", parameters=schema({
         "plan_id": text_field("计划 ID"),
@@ -648,8 +660,10 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         target = self.engine.owned("plan", plan_id, kwargs["stream_id"])
         self.living.check_influence(kwargs["stream_id"], kwargs.get("user_id", ""), [target])
         if action == "update":
-            return public_plan(self.spatial.change(plan_id, PlanPatch.model_validate(patch or {}), kwargs["stream_id"], self.now()))
-        return public_plan(self.spatial.transition(plan_id, action, kwargs["stream_id"], self.now()))
+            saved = self.spatial.change(plan_id, PlanPatch.model_validate(patch or {}), kwargs["stream_id"], self.now())
+            return self.plan_receipt(saved, "已修改")
+        saved = self.spatial.transition(plan_id, action, kwargs["stream_id"], self.now())
+        return self.plan_receipt(saved, {"cancel": "已取消", "pause": "已暂停", "resume": "已恢复"}[action])
 
     async def sync_experience(self, record: dict) -> dict:
         if record["memory_revision"] == record["revision"]:
@@ -783,7 +797,7 @@ class MaiWeavePlugin(WebUI, FeatureTools, MaiBotPlugin):
         activity = current["title"] if current and self.engine.visible(current, session) else "正在处理其他安排" if current else "空闲"
         state = self.engine.state()
         message = (
-            f"MaiWeave 0.12.7\n启用：{self.config.life.enabled}\n当前：{activity}\n"
+            f"MaiWeave 0.13.0\n启用：{self.config.life.enabled}\n当前：{activity}\n"
             f"精力：{state['energy']:.0f}；饥饿：{state['hunger']:.0f}；心情：{state['mood']:.0f}\n"
             f"聊天流：{session}\n原生记忆连接：{'已配置' if self.config.memory.enabled else '未配置'}\n"
             f"最近运行错误：{self.last_error or '无'}"

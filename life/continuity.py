@@ -210,6 +210,8 @@ class Continuity:
         else:
             prompt += ("从已有记录提取活动类别 activity 和具体对象 subject，输出这两个字段。"
                        "关联阶段目标时，依据现有结果返回goal_units（有实质进展为1，没有或未知为0）和next_action（依据现有记录提出下一步）。")
+        if enrich and plan["kind"] == "cook" and not plan.get("food"):
+            prompt += "meal_ready 填这次是否已经做好留给自己吃的一餐。切洗备料、尚未做完或做给别人吃时填 false。"
         if enrich and plan.get("routine_id") and plan.get("shift_scene"):
             prompt += ("本次课或班的收尾以现有经历为准。「下次接着做」已由课表或排班安排。"
                        "另有明确的班外事项才填new_followup；班外带薪零工沿用next_action和hourly_pay。")
@@ -242,6 +244,11 @@ class Continuity:
                     event.update(enjoyment=result.enjoyment, next_action=result.next_action)
                     self.engine.score_result(event, result.importance, result.score_reason)
                     store.put("experience", event)
+                    if plan["kind"] == "cook" and not plan.get("food") and result.meal_ready:
+                        plan["food"] = "做好留餐"
+                        store.put("plan", plan)
+                        self.engine.wallet.settle_food(plan)
+                        event = store.get("experience", event["id"])
                     if not plan.get("shift_scene"):
                         self.engine.affect(result.mood, result.stress, result.summary, now, duration_hours=48, session=plan["session_id"])
                     previous = store.find("preference", key) or {"id": key, "session_id": plan["session_id"], "activity": result.activity, "score": 0, "samples": 0, "evidence_ids": []}
